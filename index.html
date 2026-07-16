@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mess Login · Sunrise Mess</title>
+<link rel="stylesheet" href="css/main.css">
+<link rel="stylesheet" href="css/dark-mode.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+  body { display: flex; align-items: center; justify-content: center; padding: var(--space-5); }
+  .auth-shell { width: 100%; max-width: 400px; }
+  .auth-brand { text-align: center; margin-bottom: var(--space-6); }
+  .auth-brand .plate { width: 56px; height: 56px; border-radius: 50%; background: var(--color-primary); color: #fff; display: flex; align-items: center; justify-content: center; margin: 0 auto var(--space-3); font-size: 24px; box-shadow: var(--shadow-md); }
+  .auth-tabs { display: flex; background: var(--color-surface-2); border-radius: var(--radius-pill); padding: 4px; margin-bottom: var(--space-5); }
+  .auth-tabs button { flex: 1; border: none; background: none; padding: 10px; border-radius: var(--radius-pill); font-weight: 700; font-size: 14px; color: var(--color-ink-soft); cursor: pointer; }
+  .auth-tabs button.is-active { background: var(--color-surface); color: var(--color-primary); box-shadow: var(--shadow-sm); }
+  .auth-note { font-size: 12px; text-align: center; margin-top: var(--space-4); }
+  .view { display: none; }
+  .view.is-active { display: block; }
+</style>
+</head>
+<body>
+
+<div class="auth-shell">
+  <div class="auth-brand">
+    <div class="plate"><i class="fa-solid fa-utensils"></i></div>
+    <h1>Sunrise Mess</h1>
+    <p class="text-soft">Meal booking, made painless.</p>
+  </div>
+
+  <div class="auth-tabs">
+    <button id="tabLogin" class="is-active">Log In</button>
+    <button id="tabRegister">Register</button>
+  </div>
+
+  <!-- LOGIN -->
+  <form id="loginView" class="view is-active card">
+    <div class="field">
+      <input type="email" id="loginEmail" placeholder=" " required>
+      <label>Email</label>
+    </div>
+    <div class="field">
+      <input type="password" id="loginPassword" placeholder=" " required minlength="6">
+      <label>Password</label>
+    </div>
+    <button type="submit" class="btn btn-primary btn-block">Log In</button>
+    <p class="auth-note text-soft">New here? Ask your admin for the registration link, or use the Register tab if you already have one.</p>
+  </form>
+
+  <!-- REGISTER -->
+  <form id="registerView" class="view card">
+    <div class="field">
+      <input type="text" id="regName" placeholder=" " required>
+      <label>Full name</label>
+    </div>
+    <div class="field">
+      <input type="text" id="regRoom" placeholder=" " required>
+      <label>Room number</label>
+    </div>
+    <div class="field">
+      <input type="tel" id="regMobile" placeholder=" " required pattern="[0-9]{10}">
+      <label>Mobile number</label>
+    </div>
+    <div class="field">
+      <input type="email" id="regEmail" placeholder=" " required>
+      <label>Email</label>
+    </div>
+    <div class="field">
+      <input type="password" id="regPassword" placeholder=" " required minlength="6">
+      <label>Password</label>
+    </div>
+    <button type="submit" class="btn btn-primary btn-block">Submit Registration</button>
+    <p class="auth-note text-soft">Your request goes to the admin for approval before you can log in.</p>
+  </form>
+</div>
+
+<script type="module">
+  import { login, submitRegistration, redirectIfLoggedIn } from './js/auth.js';
+  import { initTheme } from './js/utils.js';
+
+  initTheme();
+  redirectIfLoggedIn();
+
+  const params = new URLSearchParams(location.search);
+  if (params.get('pending') === '1') {
+    import('./js/components/Toast.js').then(({ toast }) => toast.info('Your registration is pending admin approval.'));
+  }
+
+  const tabLogin = document.getElementById('tabLogin');
+  const tabRegister = document.getElementById('tabRegister');
+  const loginView = document.getElementById('loginView');
+  const registerView = document.getElementById('registerView');
+
+  tabLogin.onclick = () => {
+    tabLogin.classList.add('is-active'); tabRegister.classList.remove('is-active');
+    loginView.classList.add('is-active'); registerView.classList.remove('is-active');
+  };
+  tabRegister.onclick = () => {
+    tabRegister.classList.add('is-active'); tabLogin.classList.remove('is-active');
+    registerView.classList.add('is-active'); loginView.classList.remove('is-active');
+  };
+
+  loginView.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = loginView.querySelector('button[type="submit"]');
+    btn.disabled = true; btn.textContent = 'Logging in…';
+    await login(loginEmail.value.trim(), loginPassword.value);
+    btn.disabled = false; btn.textContent = 'Log In';
+  });
+
+  registerView.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = registerView.querySelector('button[type="submit"]');
+    btn.disabled = true; btn.textContent = 'Submitting…';
+    const ok = await submitRegistration({
+      name: regName.value.trim(),
+      room_number: regRoom.value.trim(),
+      mobile: regMobile.value.trim(),
+      email: regEmail.value.trim(),
+      password: regPassword.value
+    });
+    btn.disabled = false; btn.textContent = 'Submit Registration';
+    if (ok) { registerView.reset(); tabLogin.click(); }
+  });
+</script>
+</body>
+</html>

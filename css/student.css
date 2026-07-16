@@ -1,0 +1,26 @@
+/* Student-facing page tweaks layered on top of main.css */
+
+.status-hero {
+  background: linear-gradient(160deg, var(--color-primary) 0%, #24401F 100%);
+  color: #fff; border-radius: var(--radius-lg); padding: var(--space-6);
+  box-shadow: var(--shadow-md);
+}
+.status-hero .thali-ring__row { color: rgba(255,255,255,0.92); }
+.status-hero__greeting { font-size: 13px; opacity: 0.8; margin-bottom: 2px; }
+
+.meal-card { display: flex; flex-direction: column; gap: var(--space-3); }
+.meal-card__head { display: flex; align-items: center; justify-content: space-between; }
+.meal-card__head .meal-name { font-family: var(--font-display); font-size: 17px; font-weight: 600; }
+.meal-card__menu-text { font-size: 13px; color: var(--color-ink-soft); }
+.deadline-banner {
+  display: flex; align-items: center; gap: var(--space-2);
+  background: var(--color-accent-soft); color: var(--color-accent-ink);
+  padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); font-size: 13px; font-weight: 600;
+}
+.deadline-banner.is-locked { background: var(--color-surface-2); color: var(--color-ink-soft); }
+
+.menu-week-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.menu-day-card__day { font-family: var(--font-display); font-weight: 600; font-size: 15px; }
+.menu-day-card__meal { font-size: 13px; margin-top: 2px; }
+.menu-day-card__meal b { color: var(--color-ink); }
+.menu-day-card.is-today { border-color: var(--color-primary); box-shadow: 0 0 0 1px var(--color-primary); }

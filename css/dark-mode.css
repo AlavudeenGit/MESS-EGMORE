@@ -1,0 +1,37 @@
+/* Dark mode — toggled by setting data-theme="dark" on <html>, persisted in
+   localStorage by utils.js (theme). Keeps the same warm-mess-hall identity,
+   just lit differently: charcoal tray instead of steel tray. */
+
+:root[data-theme="dark"] {
+  --color-bg:        #1B1815;
+  --color-surface:   #262220;
+  --color-surface-2: #322C27;
+  --color-ink:       #F3EEE3;
+  --color-ink-soft:  #B3AB9C;
+  --color-border:    #3B342C;
+
+  --color-primary:      #6FA97A;
+  --color-primary-ink:  #10190F;
+  --color-primary-soft: #223A26;
+
+  --color-accent:       #E4A72E;
+  --color-accent-ink:   #1B1400;
+  --color-accent-soft:  #3A2E0E;
+
+  --color-danger:       #E5786A;
+  --color-danger-soft:  #3B2220;
+
+  --color-double:       #B392DE;
+  --color-double-soft:  #2E2438;
+
+  --color-no-food:      #A39C8C;
+  --color-no-food-soft: #2E2A22;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 6px 20px rgba(0,0,0,0.35);
+  --shadow-lg: 0 16px 40px rgba(0,0,0,0.5);
+}
+
+:root[data-theme="dark"] .topbar {
+  background: color-mix(in srgb, var(--color-bg) 85%, transparent);
+}
