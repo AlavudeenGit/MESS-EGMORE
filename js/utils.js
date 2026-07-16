@@ -1,7 +1,7 @@
 // ============================================================================
 // utils.js — shared helpers used across student + admin modules
 // ============================================================================
-import { supabase, DEFAULT_SETTINGS } from './config.js';
+import { supabase, DEFAULT_SETTINGS } from "./config.js";
 
 // ---- date helpers -----------------------------------------------------------
 export function todayISO() {
@@ -14,27 +14,32 @@ export function tomorrowISO() {
 }
 export function toISO(date) {
   const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
 export function formatDate(iso, opts = {}) {
-  if (!iso) return '—';
-  const d = new Date(iso + 'T00:00:00');
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', ...opts });
+  if (!iso) return "—";
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    ...opts,
+  });
 }
 export function isoDayOfWeek(iso) {
   // returns 1 (Mon) .. 7 (Sun) to match menu.day_of_week
-  const d = new Date(iso + 'T00:00:00');
+  const d = new Date(iso + "T00:00:00");
   const js = d.getDay(); // 0=Sun..6=Sat
   return js === 0 ? 7 : js;
 }
 export function monthStartISO(year, month /* 1-12 */) {
-  return `${year}-${String(month).padStart(2, '0')}-01`;
+  return `${year}-${String(month).padStart(2, "0")}-01`;
 }
 export function currentTimeHHMM() {
   const d = new Date();
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 /** true if current time is between `open` and `close` (both "HH:MM", may span midnight) */
 export function isWithinWindow(open, close) {
@@ -50,32 +55,37 @@ export function isPastDeadline(deadlineHHMM) {
 let _settingsCache = null;
 export async function getSettings(force = false) {
   if (_settingsCache && !force) return _settingsCache;
-  const { data, error } = await supabase.from('settings').select('key, value');
+  const { data, error } = await supabase.from("settings").select("key, value");
   if (error || !data) {
-    console.error('getSettings error', error);
+    console.error("getSettings error", error);
     _settingsCache = { ...DEFAULT_SETTINGS };
     return _settingsCache;
   }
   const merged = { ...DEFAULT_SETTINGS };
-  data.forEach(row => { merged[row.key] = row.value; });
+  data.forEach((row) => {
+    merged[row.key] = row.value;
+  });
   _settingsCache = merged;
   return merged;
 }
-export function invalidateSettingsCache() { _settingsCache = null; }
+export function invalidateSettingsCache() {
+  _settingsCache = null;
+}
 
 // ---- theme (dark mode) ---------------------------------------------------------
 export function initTheme() {
-  const saved = localStorage.getItem('mess_theme');
-  if (saved === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+  const saved = localStorage.getItem("mess_theme");
+  if (saved === "dark")
+    document.documentElement.setAttribute("data-theme", "dark");
 }
 export function toggleTheme() {
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
   if (isDark) {
-    document.documentElement.removeAttribute('data-theme');
-    localStorage.setItem('mess_theme', 'light');
+    document.documentElement.removeAttribute("data-theme");
+    localStorage.setItem("mess_theme", "light");
   } else {
-    document.documentElement.setAttribute('data-theme', 'dark');
-    localStorage.setItem('mess_theme', 'dark');
+    document.documentElement.setAttribute("data-theme", "dark");
+    localStorage.setItem("mess_theme", "dark");
   }
 }
 
@@ -89,46 +99,71 @@ export function debounce(fn, wait = 300) {
 }
 export function currency(n) {
   const num = Number(n || 0);
-  return '₹' + num.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return (
+    "₹" +
+    num.toLocaleString("en-IN", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    })
+  );
 }
-export function initials(name = '') {
-  return name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase()).join('');
+export function initials(name = "") {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join("");
 }
-export function capitalize(s = '') { return s.charAt(0).toUpperCase() + s.slice(1); }
+export function capitalize(s = "") {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 // ---- export helpers (Excel via SheetJS, PDF via jsPDF) ---------------------------
 /**
  * rows: array of plain objects (keys become column headers)
  * filename: without extension
  */
-export function exportToExcel(rows, filename = 'export') {
-  if (!rows || !rows.length) { return; }
+export function exportToExcel(rows, filename = "export") {
+  if (!rows || !rows.length) {
+    return;
+  }
   const ws = window.XLSX.utils.json_to_sheet(rows);
   const wb = window.XLSX.utils.book_new();
-  window.XLSX.utils.book_append_sheet(wb, ws, 'Report');
+  window.XLSX.utils.book_append_sheet(wb, ws, "Report");
   window.XLSX.writeFile(wb, `${filename}.xlsx`);
 }
 
 /**
  * columns: [{ key, label }], rows: array of plain objects
  */
-export function exportToPDF(columns, rows, title = 'Report', filename = 'export') {
+export function exportToPDF(
+  columns,
+  rows,
+  title = "Report",
+  filename = "export",
+) {
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ orientation: columns.length > 6 ? 'landscape' : 'portrait' });
+  const doc = new jsPDF({
+    orientation: columns.length > 6 ? "landscape" : "portrait",
+  });
   doc.setFontSize(14);
   doc.text(title, 14, 16);
   doc.setFontSize(9);
-  doc.text(`Generated ${new Date().toLocaleString('en-IN')}`, 14, 22);
+  doc.text(`Generated ${new Date().toLocaleString("en-IN")}`, 14, 22);
 
-  const head = [columns.map(c => c.label)];
-  const body = rows.map(r => columns.map(c => String(r[c.key] ?? '')));
+  const head = [columns.map((c) => c.label)];
+  const body = rows.map((r) => columns.map((c) => String(r[c.key] ?? "")));
 
   if (doc.autoTable) {
     doc.autoTable({ head, body, startY: 28, styles: { fontSize: 8 } });
   } else {
     // fallback: plain text dump if autotable plugin isn't loaded
     let y = 30;
-    body.forEach(row => { doc.text(row.join(' | '), 14, y); y += 6; });
+    body.forEach((row) => {
+      doc.text(row.join(" | "), 14, y);
+      y += 6;
+    });
   }
   doc.save(`${filename}.pdf`);
 }
@@ -136,7 +171,7 @@ export function exportToPDF(columns, rows, title = 'Report', filename = 'export'
 export function printElement(elementId) {
   const el = document.getElementById(elementId);
   if (!el) return;
-  const w = window.open('', '_blank');
+  const w = window.open("", "_blank");
   w.document.write(`<html><head><title>Print</title>
     <link rel="stylesheet" href="css/main.css"></head>
     <body>${el.outerHTML}</body></html>`);
@@ -152,21 +187,27 @@ export function printElement(elementId) {
  * Redirects to index.html if not authenticated or wrong role.
  */
 export async function requireRole(role) {
-  const { data: { session } } = await supabase.auth.getSession();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
   if (!session) {
-    window.location.href = 'index.html';
+    window.location.href = "index.html";
     return null;
   }
-  const table = role === 'admin' ? 'admins' : 'students';
-  const { data, error } = await supabase.from(table).select('*').eq('id', session.user.id).maybeSingle();
+  const table = role === "admin" ? "admins" : "students";
+  const { data, error } = await supabase
+    .from(table)
+    .select("*")
+    .eq("id", session.user.id)
+    .maybeSingle();
   if (error || !data) {
     await supabase.auth.signOut();
-    window.location.href = 'index.html';
+    window.location.href = "index.html";
     return null;
   }
-  if (role === 'student' && data.status !== 'active') {
+  if (role === "student" && data.status !== "active") {
     await supabase.auth.signOut();
-    window.location.href = 'index.html?pending=1';
+    window.location.href = "index.html?pending=1";
     return null;
   }
   return { session, profile: data };

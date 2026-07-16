@@ -4,31 +4,36 @@
 // ============================================================================
 
 function ensureStack() {
-  let stack = document.querySelector('.toast-stack');
+  let stack = document.querySelector(".toast-stack");
   if (!stack) {
-    stack = document.createElement('div');
-    stack.className = 'toast-stack';
+    stack = document.createElement("div");
+    stack.className = "toast-stack";
     document.body.appendChild(stack);
   }
   return stack;
 }
 
-function show(message, type = 'info', duration = 3200) {
+function show(message, type = "info", duration = 3200) {
   const stack = ensureStack();
-  const el = document.createElement('div');
+  const el = document.createElement("div");
   el.className = `toast toast--${type}`;
-  const icon = type === 'success' ? 'fa-circle-check' : type === 'error' ? 'fa-circle-exclamation' : 'fa-circle-info';
+  const icon =
+    type === "success"
+      ? "fa-circle-check"
+      : type === "error"
+        ? "fa-circle-exclamation"
+        : "fa-circle-info";
   el.innerHTML = `<i class="fa-solid ${icon}"></i><span>${message}</span>`;
   stack.appendChild(el);
-  requestAnimationFrame(() => el.classList.add('is-visible'));
+  requestAnimationFrame(() => el.classList.add("is-visible"));
   setTimeout(() => {
-    el.classList.remove('is-visible');
+    el.classList.remove("is-visible");
     setTimeout(() => el.remove(), 250);
   }, duration);
 }
 
 export const toast = {
-  success: (msg, d) => show(msg, 'success', d),
-  error: (msg, d) => show(msg, 'error', d),
-  info: (msg, d) => show(msg, 'info', d),
+  success: (msg, d) => show(msg, "success", d),
+  error: (msg, d) => show(msg, "error", d),
+  info: (msg, d) => show(msg, "info", d),
 };

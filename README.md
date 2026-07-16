@@ -23,8 +23,8 @@ Mobile-first Mess Meal Booking System. Vanilla JS (ES modules) + Supabase
   spec, and a **Settings** page to edit deadlines, fine amounts, No Food
   toggles, and per-meal rates without touching SQL.
 - **Design system** — `css/main.css` + `css/student.css` + `css/admin.css`
-  + `css/dark-mode.css`. Palette and the thali-ring signature widget are
-  described inline as CSS comments.
+  - `css/dark-mode.css`. Palette and the thali-ring signature widget are
+    described inline as CSS comments.
 
 ## 1. Set up Supabase
 
@@ -34,8 +34,8 @@ Mobile-first Mess Meal Booking System. Vanilla JS (ES modules) + Supabase
    **anon public key**.
 4. Paste them into `js/config.js`:
    ```js
-   const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
-   const SUPABASE_ANON_KEY = 'YOUR-ANON-KEY';
+   const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
+   const SUPABASE_ANON_KEY = "YOUR-ANON-KEY";
    ```
 
 ### Turn off email confirmation (important)
@@ -51,7 +51,7 @@ With this off, `auth.signUp()` returns an active, immediately-loginable
 auth user. The student still can't actually log in yet, though, because
 `requireRole()`/`login()` in this app separately check `students.status
 = 'active'` — so the admin approval step is still the real gate. This
-setting only removes the *extra* email-click step Supabase would
+setting only removes the _extra_ email-click step Supabase would
 otherwise add on top of it.
 
 ### Create the first admin account
@@ -184,8 +184,8 @@ extend the schema:
   rules at the database layer**, not just in the browser. Without it, a
   student could call the API directly to unlock an already-locked meal,
   zero out their own fine, mark a meal `cancelled_by_admin`, or write
-  bookings for arbitrary dates — RLS alone only decides *which rows* a
-  student can touch, not *which columns or values*. The trigger checks
+  bookings for arbitrary dates — RLS alone only decides _which rows_ a
+  student can touch, not _which columns or values_. The trigger checks
   deadlines, lock state, and protects `fine_amount`/`cancelled_by_admin`
   from student writes, while still letting admin overrides (`is_admin()`)
   and the service-role Edge Function sweeps bypass it.
@@ -205,6 +205,44 @@ extend the schema:
 - **`anon` role's table grants are explicitly revoked** as defense in
   depth, so a future overly-permissive policy can't accidentally expose
   data to logged-out requests.
+
+## Bug-fix round — student flow, admin meals table, mobile nav, reports UI
+
+**Student "Mark Food" — select then submit, shared time window.**
+Tapping a meal option used to call the API immediately. Now it only
+updates local selection state (highlights the button); nothing is saved
+until the new **Submit** button is tapped, which sends everything
+changed in one batch call. Both selecting _and_ submitting are gated to
+one shared window — default **8:30 PM–11:30 PM** — that now covers both
+tabs (today's confirmation and tomorrow's booking use the same window,
+replacing the old separate morning confirmation deadline). Outside the
+window every option is disabled and Submit is hidden. Configurable under
+Admin → Settings → Meal Selection Window; the DB trigger
+(`enforce_booking_write` in `sql/schema.sql`) enforces the same window
+server-side, not just in the UI.
+
+**Admin → Meal Entries now shows one row per student.** Breakfast, Lunch,
+and Dinner appear as three columns in the same row (each showing its
+Booked/Confirmed badges), instead of three separate rows per student.
+The Edit button opens one modal covering all three meals at once.
+
+**Admin mobile nav.** With 9 side-nav items + Logout, the old 5-icon
+bottom bar couldn't fit everything (Registrations, Weekly Menu, Expenses,
+Settings, and Logout were unreachable on a phone). The bottom nav now
+shows the 4 most-used items (Home, Meals, Payments, Reports) plus a
+**More** button that opens a drawer with everything else, Logout
+included.
+
+**Reports page dropdown rendering.** The Report Type `<select>` looked
+collapsed/garbled — its floating label and the selected value text were
+overlapping. Root cause: the floating-label CSS only floats the label on
+`:focus` or a manually-toggled `.has-value` class, which text inputs get
+automatically (`:not(:placeholder-shown)`) but `<select>` elements don't
+support that pseudo-class at all. Fixed by always floating `<select>`
+labels in `css/main.css`, since a dropdown always shows a value and never
+has a true empty/placeholder state the way a text field does. This fixes
+every select in the app (Report Type, expense category, settings toggles),
+not just the one that was reported.
 
 ## Not yet wired up (clearly-scoped follow-ups)
 

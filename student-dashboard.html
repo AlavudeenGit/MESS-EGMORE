@@ -1,53 +1,89 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>My Mess · Sunrise Mess</title>
-<link rel="stylesheet" href="css/main.css">
-<link rel="stylesheet" href="css/student.css">
-<link rel="stylesheet" href="css/dark-mode.css">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-</head>
-<body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>My Mess · Sunrise Mess</title>
+    <link rel="stylesheet" href="css/main.css" />
+    <link rel="stylesheet" href="css/student.css" />
+    <link rel="stylesheet" href="css/dark-mode.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+    />
+  </head>
+  <body>
+    <div class="app-shell app-shell--desktop">
+      <nav class="side-nav" id="sideNav">
+        <button class="side-nav__item" data-view="home">
+          <i class="fa-solid fa-house"></i> Dashboard
+        </button>
+        <button class="side-nav__item" data-view="markfood">
+          <i class="fa-solid fa-utensils"></i> Mark Food
+        </button>
+        <button class="side-nav__item" data-view="menu">
+          <i class="fa-solid fa-book-open"></i> Weekly Menu
+        </button>
+        <button class="side-nav__item" data-view="history">
+          <i class="fa-solid fa-clock-rotate-left"></i> History
+        </button>
+        <button class="side-nav__item" data-view="profile">
+          <i class="fa-solid fa-user"></i> Profile
+        </button>
+        <hr class="divider" />
+        <button class="side-nav__item" id="logoutBtn">
+          <i class="fa-solid fa-arrow-right-from-bracket"></i> Log Out
+        </button>
+      </nav>
 
-<div class="app-shell app-shell--desktop">
-  <nav class="side-nav" id="sideNav">
-    <button class="side-nav__item" data-view="home"><i class="fa-solid fa-house"></i> Dashboard</button>
-    <button class="side-nav__item" data-view="markfood"><i class="fa-solid fa-utensils"></i> Mark Food</button>
-    <button class="side-nav__item" data-view="menu"><i class="fa-solid fa-book-open"></i> Weekly Menu</button>
-    <button class="side-nav__item" data-view="history"><i class="fa-solid fa-clock-rotate-left"></i> History</button>
-    <button class="side-nav__item" data-view="profile"><i class="fa-solid fa-user"></i> Profile</button>
-    <hr class="divider">
-    <button class="side-nav__item" id="logoutBtn"><i class="fa-solid fa-arrow-right-from-bracket"></i> Log Out</button>
-  </nav>
+      <div>
+        <header class="topbar">
+          <span class="topbar__title" id="viewTitle">Dashboard</span>
+          <div class="topbar__actions">
+            <button
+              class="icon-btn"
+              id="themeToggle"
+              aria-label="Toggle dark mode"
+            >
+              <i class="fa-solid fa-moon"></i>
+            </button>
+          </div>
+        </header>
 
-  <div>
-    <header class="topbar">
-      <span class="topbar__title" id="viewTitle">Dashboard</span>
-      <div class="topbar__actions">
-        <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode"><i class="fa-solid fa-moon"></i></button>
+        <main class="page" id="viewRoot">
+          <div
+            class="skeleton"
+            style="height: 140px; border-radius: 24px"
+          ></div>
+          <div class="skeleton" style="height: 80px; border-radius: 16px"></div>
+        </main>
       </div>
-    </header>
+    </div>
 
-    <main class="page" id="viewRoot">
-      <div class="skeleton" style="height:140px;border-radius:24px;"></div>
-      <div class="skeleton" style="height:80px;border-radius:16px;"></div>
-    </main>
-  </div>
-</div>
+    <nav class="bottom-nav">
+      <button class="bottom-nav__item" data-view="home">
+        <i class="fa-solid fa-house"></i>Home
+      </button>
+      <button class="bottom-nav__item" data-view="markfood">
+        <i class="fa-solid fa-utensils"></i>Mark Food
+      </button>
+      <button class="bottom-nav__item" data-view="menu">
+        <i class="fa-solid fa-book-open"></i>Menu
+      </button>
+      <button class="bottom-nav__item" data-view="history">
+        <i class="fa-solid fa-clock-rotate-left"></i>History
+      </button>
+      <button class="bottom-nav__item" data-view="profile">
+        <i class="fa-solid fa-user"></i>Profile
+      </button>
+    </nav>
 
-<nav class="bottom-nav">
-  <button class="bottom-nav__item" data-view="home"><i class="fa-solid fa-house"></i>Home</button>
-  <button class="bottom-nav__item" data-view="markfood"><i class="fa-solid fa-utensils"></i>Mark Food</button>
-  <button class="bottom-nav__item" data-view="menu"><i class="fa-solid fa-book-open"></i>Menu</button>
-  <button class="bottom-nav__item" data-view="history"><i class="fa-solid fa-clock-rotate-left"></i>History</button>
-  <button class="bottom-nav__item" data-view="profile"><i class="fa-solid fa-user"></i>Profile</button>
-</nav>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.1/jspdf.plugin.autotable.min.js"></script>
-<script type="module" src="js/student/dashboard.js"></script>
-</body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.1/jspdf.plugin.autotable.min.js"></script>
+    <script type="module" src="js/student/dashboard.js"></script>
+  </body>
 </html>

@@ -5,9 +5,9 @@
 // (fines are a per-day concept, not per-meal — see sql/schema.sql:
 // recompute_daily_fine()).
 // ============================================================================
-import { supabase, MEAL_LABELS, STATUS_LABELS } from '../config.js';
-import { formatDate, exportToExcel, exportToPDF, currency } from '../utils.js';
-import { renderTable } from '../components/Table.js';
+import { supabase, MEAL_LABELS, STATUS_LABELS } from "../config.js";
+import { formatDate, exportToExcel, exportToPDF, currency } from "../utils.js";
+import { renderTable } from "../components/Table.js";
 
 export async function renderHistory(root, ctx) {
   root.innerHTML = `
@@ -30,45 +30,68 @@ export async function renderHistory(root, ctx) {
     <div id="historyTable"><div class="skeleton" style="height:200px;border-radius:16px;"></div></div>
   `;
 
-  const state = { month: '', fine: '' };
+  const state = { month: "", fine: "" };
   let lastRows = [];
 
   async function load() {
-    let query = supabase.from('bookings')
-      .select('date, meal_type, confirmed_status, booking_status')
-      .eq('student_id', ctx.profile.id)
-      .order('date', { ascending: false });
+    let query = supabase
+      .from("bookings")
+      .select("date, meal_type, confirmed_status, booking_status")
+      .eq("student_id", ctx.profile.id)
+      .order("date", { ascending: false });
 
     if (state.month) {
-      const [y, m] = state.month.split('-');
-      query = query.gte('date', `${y}-${m}-01`).lte('date', new Date(Number(y), Number(m), 0).toISOString().slice(0, 10));
+      const [y, m] = state.month.split("-");
+      query = query
+        .gte("date", `${y}-${m}-01`)
+        .lte(
+          "date",
+          new Date(Number(y), Number(m), 0).toISOString().slice(0, 10),
+        );
     }
 
     const { data: bookingRows, error } = await query;
-    if (error) { document.getElementById('historyTable').innerHTML = `<p class="text-danger">Failed to load history.</p>`; return; }
+    if (error) {
+      document.getElementById("historyTable").innerHTML =
+        `<p class="text-danger">Failed to load history.</p>`;
+      return;
+    }
 
     // fines are stored per-day in the `fines` table — that's the source of truth
-    let fineQuery = supabase.from('fines').select('date, amount').eq('student_id', ctx.profile.id);
+    let fineQuery = supabase
+      .from("fines")
+      .select("date, amount")
+      .eq("student_id", ctx.profile.id);
     if (state.month) {
-      const [y, m] = state.month.split('-');
-      fineQuery = fineQuery.gte('date', `${y}-${m}-01`).lte('date', new Date(Number(y), Number(m), 0).toISOString().slice(0, 10));
+      const [y, m] = state.month.split("-");
+      fineQuery = fineQuery
+        .gte("date", `${y}-${m}-01`)
+        .lte(
+          "date",
+          new Date(Number(y), Number(m), 0).toISOString().slice(0, 10),
+        );
     }
     const { data: fineRows } = await fineQuery;
     const fineByDate = {};
-    (fineRows || []).forEach(f => { fineByDate[f.date] = (fineByDate[f.date] || 0) + Number(f.amount); });
+    (fineRows || []).forEach((f) => {
+      fineByDate[f.date] = (fineByDate[f.date] || 0) + Number(f.amount);
+    });
 
     // group booking rows by date -> { breakfast, lunch, dinner }
     const byDate = {};
-    (bookingRows || []).forEach(r => {
+    (bookingRows || []).forEach((r) => {
       byDate[r.date] = byDate[r.date] || {};
-      byDate[r.date][r.meal_type] = r.confirmed_status || r.booking_status || null;
+      byDate[r.date][r.meal_type] =
+        r.confirmed_status || r.booking_status || null;
     });
 
     let dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
-    if (state.fine === 'fined') dates = dates.filter(d => (fineByDate[d] || 0) > 0);
-    if (state.fine === 'clean') dates = dates.filter(d => !(fineByDate[d] > 0));
+    if (state.fine === "fined")
+      dates = dates.filter((d) => (fineByDate[d] || 0) > 0);
+    if (state.fine === "clean")
+      dates = dates.filter((d) => !(fineByDate[d] > 0));
 
-    lastRows = dates.map(d => ({
+    lastRows = dates.map((d) => ({
       date: d,
       breakfast: byDate[d].breakfast || null,
       lunch: byDate[d].lunch || null,
@@ -81,52 +104,90 @@ export async function renderHistory(root, ctx) {
 
   function renderTableView(rows) {
     const columns = [
-      { key: 'date', label: 'Date', render: r => formatDate(r.date) },
-      { key: 'breakfast', label: 'Breakfast', render: r => statusBadge(r.breakfast) },
-      { key: 'lunch', label: 'Lunch', render: r => statusBadge(r.lunch) },
-      { key: 'dinner', label: 'Dinner', render: r => statusBadge(r.dinner) },
-      { key: 'fine', label: 'Fine Amount', render: r => r.fine > 0 ? `<span class="text-danger">${currency(r.fine)}</span>` : currency(0) },
+      { key: "date", label: "Date", render: (r) => formatDate(r.date) },
+      {
+        key: "breakfast",
+        label: "Breakfast",
+        render: (r) => statusBadge(r.breakfast),
+      },
+      { key: "lunch", label: "Lunch", render: (r) => statusBadge(r.lunch) },
+      { key: "dinner", label: "Dinner", render: (r) => statusBadge(r.dinner) },
+      {
+        key: "fine",
+        label: "Fine Amount",
+        render: (r) =>
+          r.fine > 0
+            ? `<span class="text-danger">${currency(r.fine)}</span>`
+            : currency(0),
+      },
     ];
-    document.getElementById('historyTable').innerHTML = renderTable(columns, rows, { emptyMessage: 'No history for this filter' });
+    document.getElementById("historyTable").innerHTML = renderTable(
+      columns,
+      rows,
+      { emptyMessage: "No history for this filter" },
+    );
   }
 
   function statusBadge(status) {
-    if (!status) return '—';
+    if (!status) return "—";
     return `<span class="badge badge-${status}">${STATUS_LABELS[status] || status}</span>`;
   }
 
-  document.getElementById('filterMonth').addEventListener('change', (e) => { state.month = e.target.value; load(); });
-  document.getElementById('filterFine').addEventListener('change', (e) => { state.fine = e.target.value; load(); });
-  document.getElementById('clearFilters').addEventListener('click', () => {
-    state.month = ''; state.fine = '';
-    document.getElementById('filterMonth').value = '';
-    document.getElementById('filterFine').value = '';
+  document.getElementById("filterMonth").addEventListener("change", (e) => {
+    state.month = e.target.value;
+    load();
+  });
+  document.getElementById("filterFine").addEventListener("change", (e) => {
+    state.fine = e.target.value;
+    load();
+  });
+  document.getElementById("clearFilters").addEventListener("click", () => {
+    state.month = "";
+    state.fine = "";
+    document.getElementById("filterMonth").value = "";
+    document.getElementById("filterFine").value = "";
     load();
   });
 
-  document.getElementById('exportExcel').addEventListener('click', () => {
-    exportToExcel(lastRows.map(r => ({
-      Date: formatDate(r.date),
-      Breakfast: r.breakfast ? (STATUS_LABELS[r.breakfast] || r.breakfast) : '—',
-      Lunch: r.lunch ? (STATUS_LABELS[r.lunch] || r.lunch) : '—',
-      Dinner: r.dinner ? (STATUS_LABELS[r.dinner] || r.dinner) : '—',
-      'Fine Amount': r.fine
-    })), `my-history-${ctx.profile.name.replace(/\s+/g, '_')}`);
-  });
-  document.getElementById('exportPdf').addEventListener('click', () => {
-    exportToPDF(
-      [{ key: 'Date', label: 'Date' }, { key: 'Breakfast', label: 'Breakfast' }, { key: 'Lunch', label: 'Lunch' }, { key: 'Dinner', label: 'Dinner' }, { key: 'Fine Amount', label: 'Fine Amount' }],
-      lastRows.map(r => ({
+  document.getElementById("exportExcel").addEventListener("click", () => {
+    exportToExcel(
+      lastRows.map((r) => ({
         Date: formatDate(r.date),
-        Breakfast: r.breakfast ? (STATUS_LABELS[r.breakfast] || r.breakfast) : '—',
-        Lunch: r.lunch ? (STATUS_LABELS[r.lunch] || r.lunch) : '—',
-        Dinner: r.dinner ? (STATUS_LABELS[r.dinner] || r.dinner) : '—',
-        'Fine Amount': currency(r.fine)
+        Breakfast: r.breakfast
+          ? STATUS_LABELS[r.breakfast] || r.breakfast
+          : "—",
+        Lunch: r.lunch ? STATUS_LABELS[r.lunch] || r.lunch : "—",
+        Dinner: r.dinner ? STATUS_LABELS[r.dinner] || r.dinner : "—",
+        "Fine Amount": r.fine,
       })),
-      'My Meal History', 'my-history'
+      `my-history-${ctx.profile.name.replace(/\s+/g, "_")}`,
     );
   });
-  document.getElementById('printBtn').addEventListener('click', () => window.print());
+  document.getElementById("exportPdf").addEventListener("click", () => {
+    exportToPDF(
+      [
+        { key: "Date", label: "Date" },
+        { key: "Breakfast", label: "Breakfast" },
+        { key: "Lunch", label: "Lunch" },
+        { key: "Dinner", label: "Dinner" },
+        { key: "Fine Amount", label: "Fine Amount" },
+      ],
+      lastRows.map((r) => ({
+        Date: formatDate(r.date),
+        Breakfast: r.breakfast
+          ? STATUS_LABELS[r.breakfast] || r.breakfast
+          : "—",
+        Lunch: r.lunch ? STATUS_LABELS[r.lunch] || r.lunch : "—",
+        Dinner: r.dinner ? STATUS_LABELS[r.dinner] || r.dinner : "—",
+        "Fine Amount": currency(r.fine),
+      })),
+      "My Meal History",
+      "my-history",
+    );
+  });
+  document
+    .getElementById("printBtn")
+    .addEventListener("click", () => window.print());
 
   load();
 }

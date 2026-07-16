@@ -61,7 +61,11 @@ create table if not exists settings (
 );
 
 insert into settings (key, value) values
-  ('booking_open_time',            '18:30'),
+  -- single shared window for BOTH tomorrow's booking and today's
+  -- confirmation (see enforce_booking_write() below). confirmation_deadline
+  -- is kept only so older data/back-references don't break; it's no longer
+  -- read by the app or the trigger.
+  ('booking_open_time',            '20:30'),
   ('booking_close_time',           '23:30'),
   ('confirmation_deadline',        '11:59'),
   ('fine_mismatch_amount',         '250'),
@@ -253,8 +257,9 @@ create trigger trg_payments_updated before update on payments
 create or replace function enforce_booking_write()
 returns trigger language plpgsql as $$
 declare
-  v_open time; v_close time; v_deadline time; v_now time := current_time;
+  v_open time; v_close time; v_now time := current_time;
   v_no_food_enabled boolean;
+  v_within_window boolean;
 begin
   -- recompute_daily_fine() runs as the calling student (it's SECURITY
   -- INVOKER, and auth.uid() reflects the request's JWT regardless of
@@ -296,9 +301,10 @@ begin
 
   select value::time into v_open from settings where key = 'booking_open_time';
   select value::time into v_close from settings where key = 'booking_close_time';
-  select value::time into v_deadline from settings where key = 'confirmation_deadline';
+  v_within_window := case when v_open <= v_close then v_now between v_open and v_close
+                          else v_now >= v_open or v_now <= v_close end;
 
-  -- booking_status: only for tomorrow, only inside the booking window, only while unlocked
+  -- booking_status: only for tomorrow, only inside the shared window, only while unlocked
   if new.booking_status is distinct from old.booking_status then
     if new.date <> current_date + 1 then
       raise exception 'Booking is only accepted for tomorrow''s date';
@@ -306,18 +312,16 @@ begin
     if coalesce(old.booking_locked, false) then
       raise exception 'Booking is locked and cannot be changed';
     end if;
-    if not (
-      case when v_open <= v_close then v_now between v_open and v_close
-           else v_now >= v_open or v_now <= v_close end
-    ) then
+    if not v_within_window then
       raise exception 'Booking window is closed';
     end if;
     new.booking_locked := false;
     new.booked_at := now();
   end if;
 
-  -- confirmed_status: only for today, only before the deadline, only while unlocked;
-  -- locks immediately on submission (matches spec: "locked and cannot be modified")
+  -- confirmed_status: only for today, only inside the SAME shared window
+  -- (booking_open_time–booking_close_time), only while unlocked; locks
+  -- immediately on submission (matches spec: "locked and cannot be modified")
   if new.confirmed_status is distinct from old.confirmed_status then
     if new.date <> current_date then
       raise exception 'Confirmation is only accepted for today''s date';
@@ -325,8 +329,8 @@ begin
     if coalesce(old.confirmation_locked, false) then
       raise exception 'Confirmation is locked and cannot be changed';
     end if;
-    if v_now > v_deadline then
-      raise exception 'Confirmation deadline has passed';
+    if not v_within_window then
+      raise exception 'Meal selection window is closed';
     end if;
     if new.confirmed_status = 'no_food' then
       select value = 'true' into v_no_food_enabled from settings where key = 'no_food_enabled_' || new.meal_type;
@@ -357,8 +361,19 @@ for each row execute function enforce_booking_write();
 -- three meal rows and capping — done in recompute_daily_fine() below, which
 -- should be called after any booking/confirmation write for that day.
 -- ---------------------------------------------------------------------------
+-- SECURITY DEFINER: this function is called directly by students (see
+-- js/student/confirmation.js) but needs to INSERT/DELETE in `fines` and
+-- UPDATE `bookings.fine_amount` — both restricted to admins by RLS. Since
+-- this function's own logic is what decides whether a fine applies (a
+-- student can't pass it an arbitrary amount, only trigger a recompute of
+-- their own already-committed data), running it as the owner is safe and
+-- necessary, or a student's confirmation would silently fail to record
+-- their own fine.
 create or replace function recompute_daily_fine(p_student_id uuid, p_date date)
-returns void language plpgsql as $$
+returns void language plpgsql
+security definer
+set search_path = public
+as $$
 declare
   r record;
   has_mismatch boolean := false;
@@ -366,6 +381,14 @@ declare
   v_mismatch_amt numeric(10,2) := 0;
   v_no_confirm_amt numeric(10,2) := 0;
 begin
+  -- now that this function bypasses RLS (security definer), explicitly
+  -- restrict a real student session to their own student_id. Admin
+  -- sessions and service-role Edge Function calls (auth.uid() is null)
+  -- may recompute for any student.
+  if auth.uid() is not null and not is_admin() and p_student_id <> auth.uid() then
+    raise exception 'Cannot recompute fines for another student';
+  end if;
+
   for r in
     select * from bookings where student_id = p_student_id and date = p_date
   loop
@@ -432,8 +455,20 @@ alter table expenses enable row level security;
 alter table audit_logs enable row level security;
 
 -- Helper: is the current auth user an admin?
+-- MUST be `security definer` — otherwise this function (running as the
+-- calling user) triggers the `admins_select` RLS policy below when it
+-- reads the `admins` table, and that policy calls is_admin() again,
+-- infinitely recursing until Postgres hits "stack depth limit exceeded".
+-- security definer runs it as the function owner instead, who isn't
+-- subject to the admins table's own RLS policies (RLS doesn't apply to
+-- the table owner unless FORCE ROW LEVEL SECURITY is set, which we don't).
 create or replace function is_admin()
-returns boolean language sql stable as $$
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
   select exists (select 1 from admins where id = auth.uid());
 $$;
 

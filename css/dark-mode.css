@@ -3,33 +3,33 @@
    just lit differently: charcoal tray instead of steel tray. */
 
 :root[data-theme="dark"] {
-  --color-bg:        #1B1815;
-  --color-surface:   #262220;
-  --color-surface-2: #322C27;
-  --color-ink:       #F3EEE3;
-  --color-ink-soft:  #B3AB9C;
-  --color-border:    #3B342C;
+  --color-bg: #1b1815;
+  --color-surface: #262220;
+  --color-surface-2: #322c27;
+  --color-ink: #f3eee3;
+  --color-ink-soft: #b3ab9c;
+  --color-border: #3b342c;
 
-  --color-primary:      #6FA97A;
-  --color-primary-ink:  #10190F;
-  --color-primary-soft: #223A26;
+  --color-primary: #6fa97a;
+  --color-primary-ink: #10190f;
+  --color-primary-soft: #223a26;
 
-  --color-accent:       #E4A72E;
-  --color-accent-ink:   #1B1400;
-  --color-accent-soft:  #3A2E0E;
+  --color-accent: #e4a72e;
+  --color-accent-ink: #1b1400;
+  --color-accent-soft: #3a2e0e;
 
-  --color-danger:       #E5786A;
-  --color-danger-soft:  #3B2220;
+  --color-danger: #e5786a;
+  --color-danger-soft: #3b2220;
 
-  --color-double:       #B392DE;
-  --color-double-soft:  #2E2438;
+  --color-double: #b392de;
+  --color-double-soft: #2e2438;
 
-  --color-no-food:      #A39C8C;
-  --color-no-food-soft: #2E2A22;
+  --color-no-food: #a39c8c;
+  --color-no-food-soft: #2e2a22;
 
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
-  --shadow-md: 0 6px 20px rgba(0,0,0,0.35);
-  --shadow-lg: 0 16px 40px rgba(0,0,0,0.5);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
 }
 
 :root[data-theme="dark"] .topbar {

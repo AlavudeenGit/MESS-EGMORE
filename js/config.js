@@ -74,7 +74,11 @@ export const DAY_NAMES = [
 // default fallbacks — actual values are read from the `settings` table
 // via utils.js:getSettings() and merged over these
 export const DEFAULT_SETTINGS = {
-  booking_open_time: "18:30",
+  // single window for BOTH tomorrow's booking and today's confirmation —
+  // see js/student/booking.js / confirmation.js. confirmation_deadline is
+  // kept as a settings key for backward compatibility but is no longer
+  // read anywhere in the app.
+  booking_open_time: "20:30",
   booking_close_time: "23:30",
   confirmation_deadline: "11:59",
   fine_mismatch_amount: "250",

@@ -1,91 +1,186 @@
 // ============================================================================
 // student/confirmation.js — "today" meal confirmation (Yes / No / No Food / Double)
-// Locks after submission or after the configured deadline.
+//
+// Behavior (per bug-fix round):
+//   - Tapping an option only updates the LOCAL selection (highlights it) —
+//     no API call happens yet.
+//   - A single Submit button at the bottom sends everything that changed in
+//     one batch call.
+//   - Both selecting and submitting are only allowed inside the shared
+//     booking_open_time–booking_close_time window (default 8:30–11:30 PM).
+//     Outside that window every option is disabled and Submit is hidden.
 // ============================================================================
-import { supabase, MEAL_TYPES, MEAL_LABELS, STATUS_LABELS } from '../config.js';
-import { todayISO, getSettings, isPastDeadline, currentTimeHHMM } from '../utils.js';
-import { toast } from '../components/Toast.js';
+import { supabase, MEAL_TYPES, MEAL_LABELS, STATUS_LABELS } from "../config.js";
+import { todayISO, getSettings, isWithinWindow } from "../utils.js";
+import { toast } from "../components/Toast.js";
 
 export async function renderConfirmationPanel(container, ctx) {
   const today = todayISO();
   const settings = await getSettings();
-  const deadlinePassed = isPastDeadline(settings.confirmation_deadline);
+  const windowOpen = isWithinWindow(
+    settings.booking_open_time,
+    settings.booking_close_time,
+  );
 
   const { data: rows, error } = await supabase
-    .from('bookings').select('*')
-    .eq('student_id', ctx.profile.id).eq('date', today);
+    .from("bookings")
+    .select("*")
+    .eq("student_id", ctx.profile.id)
+    .eq("date", today);
 
-  if (error) { container.innerHTML = `<p class="text-danger">Could not load today's status.</p>`; return; }
+  if (error) {
+    container.innerHTML = `<p class="text-danger">Could not load today's status.</p>`;
+    return;
+  }
 
   const byMeal = {};
-  MEAL_TYPES.forEach(m => { byMeal[m] = rows.find(r => r.meal_type === m) || null; });
+  MEAL_TYPES.forEach((m) => {
+    byMeal[m] = rows.find((r) => r.meal_type === m) || null;
+  });
+
+  // local, unsaved selection state — starts from whatever's already confirmed
+  const selection = {};
+  MEAL_TYPES.forEach((m) => {
+    selection[m] = byMeal[m]?.confirmed_status || null;
+  });
 
   container.innerHTML = `
-    <div class="deadline-banner ${deadlinePassed ? 'is-locked' : ''}">
-      <i class="fa-solid ${deadlinePassed ? 'fa-lock' : 'fa-clock'}"></i>
-      ${deadlinePassed
-        ? `Confirmation deadline (${settings.confirmation_deadline}) has passed for today.`
-        : `Confirm before ${settings.confirmation_deadline} today, or a fine may apply.`}
+    <div class="deadline-banner ${windowOpen ? "" : "is-locked"}">
+      <i class="fa-solid ${windowOpen ? "fa-clock" : "fa-lock"}"></i>
+      ${
+        windowOpen
+          ? `Confirm before ${formatWindowLabel(settings.booking_close_time)} tonight.`
+          : `Meal selection is only open ${formatWindowLabel(settings.booking_open_time)}–${formatWindowLabel(settings.booking_close_time)}.`
+      }
     </div>
-    ${MEAL_TYPES.map(meal => mealCardHTML(meal, byMeal[meal], settings, deadlinePassed)).join('')}
+    ${MEAL_TYPES.map((meal) => mealCardHTML(meal, byMeal[meal], selection[meal], settings, windowOpen)).join("")}
+    ${windowOpen ? `<button class="btn btn-primary btn-block" id="submitConfirmation"><i class="fa-solid fa-check"></i> Submit Confirmation</button>` : ""}
   `;
 
-  MEAL_TYPES.forEach(meal => wireMealCard(container, meal, byMeal[meal], settings, deadlinePassed, ctx, today));
+  MEAL_TYPES.forEach((meal) =>
+    wireMealCardSelection(container, meal, byMeal[meal], selection, windowOpen),
+  );
+
+  const submitBtn = container.querySelector("#submitConfirmation");
+  if (submitBtn) {
+    submitBtn.addEventListener("click", () =>
+      submitConfirmations(container, ctx, today, byMeal, selection, settings),
+    );
+  }
 }
 
-function mealCardHTML(meal, row, settings, deadlinePassed) {
-  const locked = row?.confirmation_locked || row?.cancelled_by_admin;
-  const noFoodEnabled = settings[`no_food_enabled_${meal}`] === 'true';
-  const current = row?.confirmed_status || null;
-  const bookedStatus = row?.booking_status;
+function formatWindowLabel(hhmm) {
+  const [h, m] = hhmm.split(":").map(Number);
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+}
 
-  const options = ['yes', 'no', ...(noFoodEnabled ? ['no_food'] : []), 'double'];
+function mealCardHTML(meal, row, selectedValue, settings, windowOpen) {
+  const locked = row?.confirmation_locked || row?.cancelled_by_admin;
+  const noFoodEnabled = settings[`no_food_enabled_${meal}`] === "true";
+  const bookedStatus = row?.booking_status;
+  const options = [
+    "yes",
+    "no",
+    ...(noFoodEnabled ? ["no_food"] : []),
+    "double",
+  ];
+  const disabled = locked || !windowOpen;
 
   return `
     <div class="card meal-card" data-meal="${meal}">
       <div class="meal-card__head">
         <span class="meal-name">${MEAL_LABELS[meal]}</span>
-        ${row?.cancelled_by_admin ? '<span class="badge badge-no">Cancelled</span>'
-          : bookedStatus ? `<span class="badge badge-${bookedStatus}">Booked: ${STATUS_LABELS[bookedStatus]}</span>`
-          : '<span class="badge badge-locked">Not booked</span>'}
+        ${
+          row?.cancelled_by_admin
+            ? '<span class="badge badge-no">Cancelled</span>'
+            : bookedStatus
+              ? `<span class="badge badge-${bookedStatus}">Booked: ${STATUS_LABELS[bookedStatus]}</span>`
+              : '<span class="badge badge-locked">Not booked</span>'
+        }
       </div>
-      <div class="option-group ${options.length > 3 ? 'option-group--4' : ''}">
-        ${options.map(opt => `
-          <button class="option-btn ${current === opt ? 'is-selected' : ''}" data-value="${opt}"
-            ${locked || deadlinePassed ? 'disabled' : ''}>${STATUS_LABELS[opt]}</button>
-        `).join('')}
+      <div class="option-group ${options.length > 3 ? "option-group--4" : ""}">
+        ${options
+          .map(
+            (opt) => `
+          <button class="option-btn ${selectedValue === opt ? "is-selected" : ""}" data-value="${opt}"
+            ${disabled ? "disabled" : ""}>${STATUS_LABELS[opt]}</button>
+        `,
+          )
+          .join("")}
       </div>
-      ${locked ? '<p class="text-soft" style="font-size:12px;margin:0;"><i class="fa-solid fa-lock"></i> Locked</p>' : ''}
+      ${row?.confirmation_locked ? '<p class="text-soft" style="font-size:12px;margin:0;"><i class="fa-solid fa-lock"></i> Already submitted — locked</p>' : ""}
     </div>
   `;
 }
 
-function wireMealCard(container, meal, row, settings, deadlinePassed, ctx, date) {
-  if (row?.confirmation_locked || row?.cancelled_by_admin || deadlinePassed) return;
+function wireMealCardSelection(container, meal, row, selection, windowOpen) {
+  if (row?.confirmation_locked || row?.cancelled_by_admin || !windowOpen)
+    return;
   const card = container.querySelector(`[data-meal="${meal}"]`);
   if (!card) return;
-  card.querySelectorAll('.option-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const value = btn.dataset.value;
-      card.querySelectorAll('.option-btn').forEach(b => b.classList.remove('is-selected'));
-      btn.classList.add('is-selected');
-      card.querySelectorAll('.option-btn').forEach(b => b.disabled = true);
-
-      const payload = {
-        student_id: ctx.profile.id, date, meal_type: meal,
-        confirmed_status: value, confirmation_locked: true, confirmed_at: new Date().toISOString()
-      };
-      const { error } = await supabase.from('bookings')
-        .upsert(payload, { onConflict: 'student_id,date,meal_type' });
-
-      if (error) {
-        toast.error('Could not save confirmation');
-        card.querySelectorAll('.option-btn').forEach(b => b.disabled = false);
-        return;
-      }
-      await supabase.rpc('recompute_daily_fine', { p_student_id: ctx.profile.id, p_date: date });
-      toast.success(`${MEAL_LABELS[meal]} confirmed as ${STATUS_LABELS[value]}`);
-      card.insertAdjacentHTML('beforeend', '<p class="text-soft" style="font-size:12px;margin:8px 0 0;"><i class="fa-solid fa-lock"></i> Locked</p>');
+  card.querySelectorAll(".option-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      // local selection only — no API call here
+      card
+        .querySelectorAll(".option-btn")
+        .forEach((b) => b.classList.remove("is-selected"));
+      btn.classList.add("is-selected");
+      selection[meal] = btn.dataset.value;
     });
   });
+}
+
+async function submitConfirmations(
+  container,
+  ctx,
+  date,
+  byMeal,
+  selection,
+  settings,
+) {
+  const submitBtn = container.querySelector("#submitConfirmation");
+  const changed = MEAL_TYPES.filter((m) => {
+    const row = byMeal[m];
+    if (row?.confirmation_locked || row?.cancelled_by_admin) return false;
+    return selection[m] && selection[m] !== (row?.confirmed_status || null);
+  });
+
+  if (!changed.length) {
+    toast.info("Select at least one meal option before submitting.");
+    return;
+  }
+
+  submitBtn.disabled = true;
+  submitBtn.innerHTML =
+    '<i class="fa-solid fa-spinner fa-spin"></i> Submitting…';
+
+  const payload = changed.map((meal) => ({
+    student_id: ctx.profile.id,
+    date,
+    meal_type: meal,
+    confirmed_status: selection[meal],
+    confirmation_locked: true,
+    confirmed_at: new Date().toISOString(),
+  }));
+
+  const { error } = await supabase
+    .from("bookings")
+    .upsert(payload, { onConflict: "student_id,date,meal_type" });
+
+  if (error) {
+    toast.error("Could not save your confirmation. Please try again.");
+    submitBtn.disabled = false;
+    submitBtn.innerHTML =
+      '<i class="fa-solid fa-check"></i> Submit Confirmation';
+    return;
+  }
+
+  await supabase.rpc("recompute_daily_fine", {
+    p_student_id: ctx.profile.id,
+    p_date: date,
+  });
+  toast.success("Confirmation submitted");
+  await renderConfirmationPanel(container, ctx);
 }
