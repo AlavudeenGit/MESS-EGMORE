@@ -165,43 +165,41 @@ export async function renderMeals(root) {
 
 function openOverrideModal(studentRow, date, onSaved) {
   const bookingOptions = ["yes", "no", "double"];
-  const confirmOptions = ["yes", "no", "no_food", "double"];
 
   const sectionsHTML = MEAL_TYPES.map((meal) => {
     const row = studentRow.meals[meal];
+    const confirmedLabel = row?.confirmed_status
+      ? STATUS_LABELS[row.confirmed_status]
+      : "Not yet confirmed by student";
     return `
       <div style="margin-bottom:20px;" data-meal-section="${meal}">
         <h4>${MEAL_LABELS[meal]}</h4>
-        <p class="text-soft" style="font-size:12px;margin:0 0 6px;">Booking</p>
-        <div class="option-group">${bookingOptions.map((o) => `<button class="option-btn ${row?.booking_status === o ? "is-selected" : ""}" data-meal="${meal}" data-group="booking" data-value="${o}">${STATUS_LABELS[o]}</button>`).join("")}</div>
-        <p class="text-soft" style="font-size:12px;margin:10px 0 6px;">Confirmed</p>
-        <div class="option-group option-group--4">${confirmOptions.map((o) => `<button class="option-btn ${row?.confirmed_status === o ? "is-selected" : ""}" data-meal="${meal}" data-group="confirmed" data-value="${o}">${STATUS_LABELS[o]}</button>`).join("")}</div>
+        <p class="text-soft" style="font-size:12px;margin:0 0 6px;">Booking (set yesterday for today)</p>
+        <div class="option-group">${bookingOptions.map((o) => `<button class="option-btn ${row?.booking_status === o ? "is-selected" : ""}" data-meal="${meal}" data-value="${o}">${STATUS_LABELS[o]}</button>`).join("")}</div>
+        <p class="text-soft" style="font-size:12px;margin:10px 0 0;"><i class="fa-solid fa-lock"></i> Confirmed: ${confirmedLabel} — set by the student, not editable here</p>
       </div>
       <hr class="divider">
     `;
   }).join("");
 
   const body = openModal({
-    title: `Override — ${studentRow.name} (Today)`,
-    bodyHTML: `${sectionsHTML}<button class="btn btn-primary btn-block" id="saveOverride">Save All Changes</button>`,
+    title: `Override Booking — ${studentRow.name} (Today)`,
+    bodyHTML: `${sectionsHTML}<button class="btn btn-primary btn-block" id="saveOverride">Save Changes</button>`,
   });
 
   const newValues = {};
   MEAL_TYPES.forEach((meal) => {
-    newValues[meal] = {
-      booking: studentRow.meals[meal]?.booking_status || null,
-      confirmed: studentRow.meals[meal]?.confirmed_status || null,
-    };
+    newValues[meal] = studentRow.meals[meal]?.booking_status || null;
   });
 
   body.querySelectorAll(".option-btn").forEach((btn) => {
     btn.onclick = () => {
-      const { meal, group, value } = btn.dataset;
+      const { meal, value } = btn.dataset;
       body
-        .querySelectorAll(`[data-meal="${meal}"][data-group="${group}"]`)
+        .querySelectorAll(`[data-meal="${meal}"]`)
         .forEach((b) => b.classList.remove("is-selected"));
       btn.classList.add("is-selected");
-      newValues[meal][group] = value;
+      newValues[meal] = value;
     };
   });
 
@@ -214,8 +212,7 @@ function openOverrideModal(studentRow, date, onSaved) {
       student_id: studentRow.student_id,
       date,
       meal_type: meal,
-      booking_status: newValues[meal].booking,
-      confirmed_status: newValues[meal].confirmed,
+      booking_status: newValues[meal],
     }));
 
     const { error } = await supabase
@@ -224,7 +221,7 @@ function openOverrideModal(studentRow, date, onSaved) {
     if (error) {
       toast.error("Could not save overrides");
       saveBtn.disabled = false;
-      saveBtn.textContent = "Save All Changes";
+      saveBtn.textContent = "Save Changes";
       return;
     }
 
