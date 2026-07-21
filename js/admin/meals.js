@@ -1,6 +1,10 @@
 // ============================================================================
 // admin/meals.js — one row per student (Breakfast/Lunch/Dinner side by
-// side), override any meal, plus bulk-cancel a meal for Today or Tomorrow.
+// side) for TODAY only. Admin can override today's booking/confirmation,
+// but never yesterday's or a future date's — the date filter has been
+// removed entirely so there's no way to even navigate there. Bulk-cancel
+// (a separate, deliberate feature for cancelling an upcoming meal in
+// advance) still allows Today or Tomorrow.
 // ============================================================================
 import { supabase, MEAL_TYPES, MEAL_LABELS, STATUS_LABELS } from "../config.js";
 import { todayISO, tomorrowISO, formatDate, debounce } from "../utils.js";
@@ -22,8 +26,9 @@ export async function renderMeals(root) {
     </div>
 
     <div class="card">
+      <h3>Today's Meal Entries <span class="badge badge-locked">${formatDate(today)}</span></h3>
+      <p class="text-soft" style="font-size:13px;">Overrides only apply to today — there's no way to edit a past or future date from here.</p>
       <div class="filter-bar">
-        <input type="date" id="filterDate" value="${today}">
         <input type="text" id="filterName" placeholder="Search name or room…">
       </div>
     </div>
@@ -86,7 +91,7 @@ export async function renderMeals(root) {
     document.getElementById("mealsTable").innerHTML = renderTable(
       columns,
       rows,
-      { emptyMessage: "No bookings for this date" },
+      { emptyMessage: "No bookings for today" },
     );
     document.querySelectorAll('[data-act="edit"]').forEach(
       (b) =>
@@ -110,10 +115,6 @@ export async function renderMeals(root) {
     return `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">${booked}${confirmed}${!booked && !confirmed ? '<span class="text-soft" style="font-size:12px;">—</span>' : ""}</div>`;
   }
 
-  document.getElementById("filterDate").addEventListener("change", (e) => {
-    state.date = e.target.value;
-    load();
-  });
   document.getElementById("filterName").addEventListener(
     "input",
     debounce((e) => {
@@ -181,7 +182,7 @@ function openOverrideModal(studentRow, date, onSaved) {
   }).join("");
 
   const body = openModal({
-    title: `Override — ${studentRow.name}`,
+    title: `Override — ${studentRow.name} (Today)`,
     bodyHTML: `${sectionsHTML}<button class="btn btn-primary btn-block" id="saveOverride">Save All Changes</button>`,
   });
 

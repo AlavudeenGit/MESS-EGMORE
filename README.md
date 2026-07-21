@@ -244,6 +244,50 @@ has a true empty/placeholder state the way a text field does. This fixes
 every select in the app (Report Type, expense category, settings toggles),
 not just the one that was reported.
 
+## Bug-fix round — No Food restored, reports.js rewritten, real Delete
+
+**No Food was fully restored.** A prior edit had stripped it out end to
+end (settings, the DB trigger, `confirmation.js`, the admin override
+modal, and the Settings page) — but it's a required rule (booked Yes +
+confirmed No Food, when enabled for that meal, carries no fine), so it's
+back in all of those places. If your database was already updated with
+the No Food removal, run the SQL patch mentioned below to bring it back.
+
+**`reports.js` had a real bug: a missing template-literal backtick.**
+`root.innerHTML = ...` was missing its opening backtick, so the raw HTML
+after it was silently swallowed into an unterminated string (which,
+oddly, didn't throw a syntax error — it just meant the Reports page was
+broken). Two referenced-but-undefined functions (`attendanceColumns`,
+`fetchAttendance`) and an undefined `REPORT_HINTS` would have crashed the
+page the moment anyone opened Reports. Rewrote the file cleanly, and
+while doing so:
+
+- Added the **Daily Attendance Report** — students who submitted a
+  confirmation on the selected date, columns Name/Room/Breakfast/
+  Lunch/Dinner. Report type now shows a single date picker instead of
+  month/from/to when Daily Attendance is selected.
+- Added **Breakfast Count / Lunch Count / Dinner Count** columns to the
+  Student Report — confirmed yes/double counts for whatever date filter
+  (month or from/to range) is currently set.
+
+**Fine logic — confirmed no-double-penalty behavior.** The mismatch
+(₹250) and no-confirmation (₹100) conditions are mutually exclusive by
+construction: a mismatch requires an actual confirmed value to compare
+against, while no-confirmation requires zero confirmed values that day —
+so both can never be true simultaneously, and a day's fine is always
+₹250, ₹100, or ₹0, never ₹350.
+
+**Admin → Meal Entries and per-student overrides were already
+restricted to today only** (both in the UI and enforced again in the DB
+trigger) — verified this round, no change needed.
+
+**Delete now really deletes.** Added `admin-delete-student` (new Edge
+Function — deploy it per `supabase/CRON.md`). It deletes the student's
+auth login via the service role key, which cascades to remove their
+`students`/`bookings`/`fines`/`payments` rows entirely. Deactivate is
+unchanged — it still just flips `status` to `inactive` and keeps
+everything.
+
 ## Not yet wired up (clearly-scoped follow-ups)
 
 - Image/bill uploads for expenses (`expenses.bill_url` column exists;

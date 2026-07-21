@@ -70,6 +70,10 @@ insert into settings (key, value) values
   ('confirmation_deadline',        '11:59'),
   ('fine_mismatch_amount',         '250'),
   ('fine_no_confirmation_amount',  '100'),
+  -- No Food is off by default per meal; admin enables it under
+  -- Admin -> Settings -> No Food Option. When enabled for a meal, a
+  -- student who booked "yes" may confirm "no_food" with no fine charged
+  -- (see recompute_daily_fine()'s mismatch check below).
   ('no_food_enabled_breakfast',    'false'),
   ('no_food_enabled_lunch',        'false'),
   ('no_food_enabled_dinner',       'false'),
@@ -258,8 +262,8 @@ create or replace function enforce_booking_write()
 returns trigger language plpgsql as $$
 declare
   v_open time; v_close time; v_now time := current_time;
-  v_no_food_enabled boolean;
   v_within_window boolean;
+  v_no_food_enabled boolean;
 begin
   -- recompute_daily_fine() runs as the calling student (it's SECURITY
   -- INVOKER, and auth.uid() reflects the request's JWT regardless of
@@ -271,8 +275,20 @@ begin
     return new;
   end if;
 
-  -- admin overrides (meals.js) are trusted as-is
+  -- admin overrides (meals.js) are trusted for content, but NOT for which
+  -- date they touch: admin per-student overrides must be TODAY only (per
+  -- explicit requirement — no editing yesterday's or a future booking).
+  -- The one exception is bulk meal cancellation, which legitimately needs
+  -- to write tomorrow's date too (cancelling a meal in advance) — that
+  -- path always sets cancelled_by_admin = true, so it's distinguished from
+  -- a regular per-student override by that flag rather than by date alone.
   if is_admin() then
+    if new.date not in (current_date, current_date + 1) then
+      raise exception 'Cannot write bookings outside today or tomorrow';
+    end if;
+    if new.date = current_date + 1 and coalesce(new.cancelled_by_admin, false) is not true then
+      raise exception 'Only bulk meal cancellation may write to tomorrow''s date — per-student overrides are today only';
+    end if;
     return new;
   end if;
 
@@ -287,6 +303,15 @@ begin
     raise exception 'Cannot write another student''s booking';
   end if;
 
+  -- No Food is only a valid confirmed_status when the admin has enabled it
+  -- for that specific meal (Admin -> Settings -> No Food Option).
+  if new.confirmed_status = 'no_food' then
+    select value = 'true' into v_no_food_enabled from settings where key = 'no_food_enabled_' || new.meal_type;
+    if not coalesce(v_no_food_enabled, false) then
+      raise exception 'No Food is not enabled for %', new.meal_type;
+    end if;
+  end if;
+
   -- protected columns: a student can never set these directly, no matter
   -- what the API call contains
   new.fine_amount := coalesce(old.fine_amount, 0);
@@ -299,6 +324,13 @@ begin
     raise exception 'Students may only write bookings for today or tomorrow';
   end if;
 
+  -- IMPORTANT: v_now is current_time (the database SERVER's clock, in the
+  -- Asia/Kolkata timezone set at the top of this file), never anything
+  -- derived from the browser/device. A student changing their phone's
+  -- date/time has zero effect on this check — it's evaluated entirely
+  -- inside Postgres. See also get_meal_window_status() below, which lets
+  -- the client UI *display* the true server-side window state instead of
+  -- guessing from the device clock.
   select value::time into v_open from settings where key = 'booking_open_time';
   select value::time into v_close from settings where key = 'booking_close_time';
   v_within_window := case when v_open <= v_close then v_now between v_open and v_close
@@ -332,17 +364,39 @@ begin
     if not v_within_window then
       raise exception 'Meal selection window is closed';
     end if;
-    if new.confirmed_status = 'no_food' then
-      select value = 'true' into v_no_food_enabled from settings where key = 'no_food_enabled_' || new.meal_type;
-      if not coalesce(v_no_food_enabled, false) then
-        raise exception 'No Food is not enabled for %', new.meal_type;
-      end if;
-    end if;
     new.confirmation_locked := true;
     new.confirmed_at := now();
   end if;
 
   return new;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- get_meal_window_status() — lets the client ask "is the window open right
+-- now, and what time does the SERVER think it is" instead of computing that
+-- from the device's own clock. Every value here comes from Postgres
+-- (current_date/current_time in the Asia/Kolkata timezone set above), so
+-- changing a phone's date/time has no effect on what this returns — closing
+-- the loophole not just at the write-enforcement layer (enforce_booking_write,
+-- already server-side) but at the UI layer too, so a tampered device doesn't
+-- even see enabled buttons it can't actually use.
+-- ---------------------------------------------------------------------------
+create or replace function get_meal_window_status()
+returns table(server_date date, server_time time, window_open time, window_close time, is_open boolean)
+language plpgsql stable as $$
+declare
+  v_open time; v_close time;
+begin
+  select value::time into v_open from settings where key = 'booking_open_time';
+  select value::time into v_close from settings where key = 'booking_close_time';
+  return query select
+    current_date,
+    current_time::time,
+    v_open,
+    v_close,
+    case when v_open <= v_close then current_time::time between v_open and v_close
+         else current_time::time >= v_open or current_time::time <= v_close end;
 end;
 $$;
 
@@ -353,10 +407,12 @@ for each row execute function enforce_booking_write();
 
 -- ---------------------------------------------------------------------------
 -- Fine calculation — recompute fine_amount for a single booking row.
--- Rule recap:
---   ₹250 once/day  → any mismatch between booking_status and confirmed_status
---   ₹100 once/day  → booked 'yes' but no confirmation submitted at all
---   no_food exception → booked yes + confirmed no_food (when enabled) = no fine
+-- Rule recap (exactly two rules, no exceptions):
+--   ₹250 once/day  → today's confirmation does not match yesterday's booking
+--                    for ANY meal (booking_status vs confirmed_status differ)
+--   ₹100 once/day  → the student booked at least one meal (yes/double) but
+--                    submitted NO confirmation AT ALL for the day (zero
+--                    confirmed meals) once the window has closed
 -- "Once per day" is enforced by summing per (student_id, date) across the
 -- three meal rows and capping — done in recompute_daily_fine() below, which
 -- should be called after any booking/confirmation write for that day.
@@ -377,7 +433,9 @@ as $$
 declare
   r record;
   has_mismatch boolean := false;
-  has_no_confirmation boolean := false;
+  booked_count integer := 0;      -- meals booked yes/double
+  confirmed_count integer := 0;   -- meals with ANY confirmed_status set
+  any_locked boolean := false;    -- whether the window has closed for this day
   v_mismatch_amt numeric(10,2) := 0;
   v_no_confirm_amt numeric(10,2) := 0;
 begin
@@ -392,7 +450,11 @@ begin
   for r in
     select * from bookings where student_id = p_student_id and date = p_date
   loop
-    -- mismatch: booked something, confirmed something, and they disagree
+    -- mismatch: booked something, confirmed something, and they disagree.
+    -- Four combinations count as "no mismatch": Yes/Yes, No/No, Double/Double,
+    -- and Yes/No_food (the No Food exception — only meaningful when the
+    -- admin has enabled it for that meal, which enforce_booking_write()
+    -- already guarantees was true at write time for any no_food row here).
     if r.booking_status is not null and r.confirmed_status is not null then
       if not (
         (r.booking_status = 'yes' and r.confirmed_status = 'yes')
@@ -404,10 +466,14 @@ begin
       end if;
     end if;
 
-    -- no confirmation at all, but booked yes/double, and deadline has passed
-    if r.booking_status in ('yes','double') and r.confirmed_status is null
-       and r.confirmation_locked = true then
-      has_no_confirmation := true;
+    if r.booking_status in ('yes','double') then
+      booked_count := booked_count + 1;
+    end if;
+    if r.confirmed_status is not null then
+      confirmed_count := confirmed_count + 1;
+    end if;
+    if coalesce(r.confirmation_locked, false) then
+      any_locked := true;
     end if;
   end loop;
 
@@ -421,7 +487,10 @@ begin
     values (p_student_id, p_date, v_mismatch_amt, 'mismatch');
   end if;
 
-  if has_no_confirmation then
+  -- whole-day condition: booked at least one meal, confirmed literally
+  -- none of them, and the window has closed (so they still have time to
+  -- act isn't mistaken for "never confirmed at all")
+  if booked_count > 0 and confirmed_count = 0 and any_locked then
     select value::numeric into v_no_confirm_amt from settings where key = 'fine_no_confirmation_amount';
     insert into fines (student_id, date, amount, reason)
     values (p_student_id, p_date, v_no_confirm_amt, 'no_confirmation');

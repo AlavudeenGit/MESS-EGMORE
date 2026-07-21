@@ -1,12 +1,14 @@
 // ============================================================================
-// admin/reports.js — one generic report builder that covers every report
-// type in the spec: Student, Active/Inactive, Fine, Breakfast/Lunch/Dinner,
-// Booking, Confirmation, Monthly Payment, Grocery, Expense, Revenue,
-// Profit/Loss. Each report type defines its own `fetch(filters)` and
-// `columns`; the surrounding filter bar, search, and export buttons are shared.
+// admin/reports.js — one generic report builder covering every report type
+// in the spec: Student, Active/Inactive, Daily Attendance, Fine, Breakfast/
+// Lunch/Dinner, Booking, Confirmation, Monthly Payment, Grocery, Expense,
+// Revenue, Profit/Loss. Each report type defines its own `fetch(filters)`
+// and `columns`; the surrounding filter bar, search, and export buttons
+// are shared.
 // ============================================================================
 import {
   supabase,
+  MEAL_TYPES,
   MEAL_LABELS,
   STATUS_LABELS,
   EXPENSE_CATEGORY_LABELS,
@@ -30,6 +32,11 @@ const REPORT_TYPES = {
     label: "Active / Inactive Report",
     fetch: fetchStudents,
     columns: studentColumns(),
+  },
+  attendance: {
+    label: "Daily Attendance Report",
+    fetch: fetchAttendance,
+    columns: attendanceColumns(),
   },
   fine: { label: "Fine Report", fetch: fetchFines, columns: fineColumns() },
   breakfast: {
@@ -84,6 +91,30 @@ const REPORT_TYPES = {
   },
 };
 
+// reports that filter by a single specific day (not a month/range)
+const SINGLE_DATE_REPORTS = new Set(["attendance"]);
+
+const REPORT_HINTS = {
+  student: "All registered students (search by name/room).",
+  active_inactive: "All students with their current status.",
+  attendance:
+    "Only students who submitted a confirmation on the selected date.",
+  fine: "Every fine charged, filterable by month or date range.",
+  breakfast:
+    "Every breakfast booking/confirmation, filterable by month or date range.",
+  lunch: "Every lunch booking/confirmation, filterable by month or date range.",
+  dinner:
+    "Every dinner booking/confirmation, filterable by month or date range.",
+  booking: "Every meal a student booked, filterable by month or date range.",
+  confirmation:
+    "Every meal a student confirmed, filterable by month or date range.",
+  payment: "Mess payment status per student for the selected month.",
+  grocery: "Grocery expenses, filterable by month or date range.",
+  expense: "All expenses, filterable by month or date range.",
+  revenue: "Last 6 months of payments + fine collection.",
+  profit_loss: "Last 6 months of revenue vs. expenses.",
+};
+
 export async function renderReports(root) {
   root.innerHTML = `
     <div class="card">
@@ -95,10 +126,12 @@ export async function renderReports(root) {
       </div>
       <div class="filter-bar">
         <input type="text" id="reportSearch" placeholder="Search…">
+        <input type="date" id="reportDate" style="display:none;" title="Date">
         <input type="month" id="reportMonth">
         <input type="date" id="reportFrom" title="From date">
         <input type="date" id="reportTo" title="To date">
       </div>
+      <p class="text-soft" id="reportHint" style="font-size:12px;margin:8px 0 0;"></p>
     </div>
     <div class="report-toolbar">
       <button class="btn btn-secondary btn-sm" id="exportExcel"><i class="fa-solid fa-file-excel"></i> Excel</button>
@@ -111,19 +144,42 @@ export async function renderReports(root) {
   let lastRows = [];
   let lastColumns = [];
 
+  function syncFilterVisibility() {
+    const type = document.getElementById("reportType").value;
+    const isSingleDate = SINGLE_DATE_REPORTS.has(type);
+    document.getElementById("reportDate").style.display = isSingleDate
+      ? ""
+      : "none";
+    document.getElementById("reportMonth").style.display = isSingleDate
+      ? "none"
+      : "";
+    document.getElementById("reportFrom").style.display = isSingleDate
+      ? "none"
+      : "";
+    document.getElementById("reportTo").style.display = isSingleDate
+      ? "none"
+      : "";
+    if (isSingleDate && !document.getElementById("reportDate").value) {
+      document.getElementById("reportDate").value = todayISO();
+    }
+  }
+
   async function load() {
     const type = document.getElementById("reportType").value;
     const def = REPORT_TYPES[type];
+    syncFilterVisibility();
     const filters = {
       search: document
         .getElementById("reportSearch")
         .value.trim()
         .toLowerCase(),
+      date: document.getElementById("reportDate").value,
       month: document.getElementById("reportMonth").value,
       from: document.getElementById("reportFrom").value,
       to: document.getElementById("reportTo").value,
-      statusFilter: type === "active_inactive" ? true : false,
     };
+    document.getElementById("reportHint").textContent =
+      REPORT_HINTS[type] || "";
     document.getElementById("reportOutput").innerHTML =
       `<div class="skeleton" style="height:200px;border-radius:16px;"></div>`;
     const rows = await def.fetch(filters);
@@ -135,6 +191,7 @@ export async function renderReports(root) {
 
   document.getElementById("reportType").addEventListener("change", load);
   document.getElementById("reportSearch").addEventListener("change", load);
+  document.getElementById("reportDate").addEventListener("change", load);
   document.getElementById("reportMonth").addEventListener("change", load);
   document.getElementById("reportFrom").addEventListener("change", load);
   document.getElementById("reportTo").addEventListener("change", load);
@@ -157,6 +214,7 @@ export async function renderReports(root) {
     .getElementById("printBtn")
     .addEventListener("click", () => window.print());
 
+  syncFilterVisibility();
   load();
 }
 
@@ -183,6 +241,23 @@ function studentColumns() {
       label: "Joined",
       render: (r) => formatDate(r.joined_at),
     },
+    // meal-count columns, computed for whatever date filter is selected
+    // (month, or from/to range; defaults to all-time if none set)
+    {
+      key: "breakfastCount",
+      label: "Breakfast Count",
+      render: (r) => r.breakfastCount ?? 0,
+    },
+    {
+      key: "lunchCount",
+      label: "Lunch Count",
+      render: (r) => r.lunchCount ?? 0,
+    },
+    {
+      key: "dinnerCount",
+      label: "Dinner Count",
+      render: (r) => r.dinnerCount ?? 0,
+    },
   ];
 }
 async function fetchStudents(f) {
@@ -195,6 +270,99 @@ async function fetchStudents(f) {
         r.name.toLowerCase().includes(f.search) ||
         r.room_number.toLowerCase().includes(f.search),
     );
+
+  // meal counts for the selected date filter (confirmed yes/double only —
+  // matches "how many times did they actually eat", not just book)
+  let bookingQuery = supabase
+    .from("bookings")
+    .select("student_id, meal_type, confirmed_status")
+    .in("confirmed_status", ["yes", "double"]);
+  bookingQuery = applyDateFilters(bookingQuery, f);
+  const { data: mealRows } = await bookingQuery;
+
+  const countsByStudent = {};
+  (mealRows || []).forEach((r) => {
+    countsByStudent[r.student_id] = countsByStudent[r.student_id] || {
+      breakfast: 0,
+      lunch: 0,
+      dinner: 0,
+    };
+    countsByStudent[r.student_id][r.meal_type]++;
+  });
+
+  rows = rows.map((r) => ({
+    ...r,
+    breakfastCount: countsByStudent[r.id]?.breakfast || 0,
+    lunchCount: countsByStudent[r.id]?.lunch || 0,
+    dinnerCount: countsByStudent[r.id]?.dinner || 0,
+  }));
+
+  return rows;
+}
+
+function attendanceColumns() {
+  return [
+    { key: "name", label: "Name" },
+    { key: "room", label: "Room" },
+    {
+      key: "breakfast",
+      label: "Breakfast",
+      render: (r) =>
+        r.breakfast
+          ? `<span class="badge badge-${r.breakfast}">${STATUS_LABELS[r.breakfast]}</span>`
+          : "—",
+    },
+    {
+      key: "lunch",
+      label: "Lunch",
+      render: (r) =>
+        r.lunch
+          ? `<span class="badge badge-${r.lunch}">${STATUS_LABELS[r.lunch]}</span>`
+          : "—",
+    },
+    {
+      key: "dinner",
+      label: "Dinner",
+      render: (r) =>
+        r.dinner
+          ? `<span class="badge badge-${r.dinner}">${STATUS_LABELS[r.dinner]}</span>`
+          : "—",
+    },
+  ];
+}
+async function fetchAttendance(f) {
+  const date = f.date || todayISO();
+  // "only students who marked their attendance" = at least one confirmed_status
+  // for that date; students with zero confirmations that day are excluded entirely
+  const { data, error } = await supabase
+    .from("bookings")
+    .select(
+      "student_id, meal_type, confirmed_status, students(name, room_number)",
+    )
+    .eq("date", date)
+    .not("confirmed_status", "is", null);
+  if (error || !data) return [];
+
+  const byStudent = {};
+  data.forEach((r) => {
+    byStudent[r.student_id] = byStudent[r.student_id] || {
+      name: r.students?.name || "—",
+      room: r.students?.room_number || "—",
+      breakfast: null,
+      lunch: null,
+      dinner: null,
+    };
+    byStudent[r.student_id][r.meal_type] = r.confirmed_status;
+  });
+
+  let rows = Object.values(byStudent);
+  if (f.search)
+    rows = rows.filter(
+      (r) =>
+        r.name.toLowerCase().includes(f.search) ||
+        r.room.toLowerCase().includes(f.search),
+    );
+  rows.sort((a, b) => a.name.localeCompare(b.name));
   return rows;
 }
 
@@ -225,17 +393,7 @@ async function fetchFines(f) {
     .from("fines")
     .select("*, students(name, room_number)")
     .order("date", { ascending: false });
-  if (f.month) {
-    const [y, m] = f.month.split("-");
-    q = q
-      .gte("date", `${y}-${m}-01`)
-      .lte(
-        "date",
-        new Date(Number(y), Number(m), 0).toISOString().slice(0, 10),
-      );
-  }
-  if (f.from) q = q.gte("date", f.from);
-  if (f.to) q = q.lte("date", f.to);
+  q = applyDateFilters(q, f);
   const { data } = await q;
   let rows = data || [];
   if (f.search)
@@ -278,8 +436,8 @@ async function fetchMealReport(f, mealType) {
     .select("*, students(name, room_number)")
     .eq("meal_type", mealType)
     .order("date", { ascending: false });
-  applyDateFilters(q, f);
-  const { data } = await applyAndRun(q, f);
+  q = applyDateFilters(q, f);
+  const { data } = await q;
   let rows = data || [];
   if (f.search)
     rows = rows.filter((r) =>
@@ -310,7 +468,8 @@ async function fetchBookingReport(f) {
     .select("*, students(name, room_number)")
     .not("booking_status", "is", null)
     .order("date", { ascending: false });
-  const { data } = await applyAndRun(q, f);
+  q = applyDateFilters(q, f);
+  const { data } = await q;
   let rows = data || [];
   if (f.search)
     rows = rows.filter((r) =>
@@ -342,7 +501,8 @@ async function fetchConfirmationReport(f) {
     .select("*, students(name, room_number)")
     .not("confirmed_status", "is", null)
     .order("date", { ascending: false });
-  const { data } = await applyAndRun(q, f);
+  q = applyDateFilters(q, f);
+  const { data } = await q;
   let rows = data || [];
   if (f.search)
     rows = rows.filter((r) =>
@@ -405,7 +565,8 @@ async function fetchExpenseReport(f, categoryFilter) {
     .select("*")
     .order("date", { ascending: false });
   if (categoryFilter) q = q.eq("category", categoryFilter);
-  const { data } = await applyAndRun(q, f);
+  q = applyDateFilters(q, f);
+  const { data } = await q;
   return data || [];
 }
 
@@ -425,7 +586,7 @@ function revenueColumns() {
     { key: "total", label: "Total Revenue", render: (r) => currency(r.total) },
   ];
 }
-async function fetchRevenueReport(f) {
+async function fetchRevenueReport() {
   const months = last6Months();
   const rows = [];
   for (const m of months) {
@@ -462,7 +623,7 @@ function profitLossColumns() {
     },
   ];
 }
-async function fetchProfitLossReport(f) {
+async function fetchProfitLossReport() {
   const months = last6Months();
   const rows = [];
   for (const m of months) {
@@ -490,7 +651,7 @@ async function fetchProfitLossReport(f) {
 }
 
 // ---- shared helpers -----------------------------------------------------------
-function applyAndRun(query, f) {
+function applyDateFilters(query, f) {
   if (f.month) {
     const [y, m] = f.month.split("-");
     query = query
@@ -503,9 +664,6 @@ function applyAndRun(query, f) {
   if (f.from) query = query.gte("date", f.from);
   if (f.to) query = query.lte("date", f.to);
   return query;
-}
-function applyDateFilters() {
-  /* kept for readability; logic lives in applyAndRun */
 }
 function last6Months() {
   const out = [];

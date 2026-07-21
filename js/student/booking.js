@@ -9,7 +9,7 @@
 // window (default 8:30–11:30 PM).
 // ============================================================================
 import { supabase, MEAL_TYPES, MEAL_LABELS, STATUS_LABELS } from "../config.js";
-import { tomorrowISO, getSettings, isWithinWindow } from "../utils.js";
+import { tomorrowISO, getServerWindowStatus } from "../utils.js";
 import { toast } from "../components/Toast.js";
 import { renderConfirmationPanel } from "./confirmation.js";
 
@@ -41,11 +41,8 @@ export async function renderMarkFood(root, ctx) {
 
 async function renderBookingPanel(container, ctx) {
   const tomorrow = tomorrowISO();
-  const settings = await getSettings();
-  const windowOpen = isWithinWindow(
-    settings.booking_open_time,
-    settings.booking_close_time,
-  );
+  const windowStatus = await getServerWindowStatus();
+  const windowOpen = windowStatus.is_open;
 
   const { data: rows, error } = await supabase
     .from("bookings")
@@ -73,8 +70,8 @@ async function renderBookingPanel(container, ctx) {
       <i class="fa-solid ${windowOpen ? "fa-clock" : "fa-lock"}"></i>
       ${
         windowOpen
-          ? `Booking window open until ${formatWindowLabel(settings.booking_close_time)} tonight.`
-          : `Booking is only open ${formatWindowLabel(settings.booking_open_time)}–${formatWindowLabel(settings.booking_close_time)}.`
+          ? `Booking window open until ${formatWindowLabel(windowStatus.window_close)} tonight.`
+          : `Booking is only open ${formatWindowLabel(windowStatus.window_open)}–${formatWindowLabel(windowStatus.window_close)} (server time).`
       }
     </div>
     ${MEAL_TYPES.map((meal) => bookingCardHTML(meal, byMeal[meal], selection[meal], windowOpen)).join("")}
@@ -100,7 +97,8 @@ async function renderBookingPanel(container, ctx) {
 }
 
 function formatWindowLabel(hhmm) {
-  const [h, m] = hhmm.split(":").map(Number);
+  if (!hhmm) return "";
+  const [h, m] = String(hhmm).split(":").map(Number);
   const period = h >= 12 ? "PM" : "AM";
   const h12 = h % 12 === 0 ? 12 : h % 12;
   return `${h12}:${String(m).padStart(2, "0")} ${period}`;
@@ -175,9 +173,14 @@ async function submitBookings(container, ctx, date, byMeal, selection) {
     .upsert(payload, { onConflict: "student_id,date,meal_type" });
 
   if (error) {
-    toast.error("Could not save your booking. Please try again.");
+    // surface the real DB-side reason (e.g. window closed per the server's
+    // own clock) rather than a generic message
+    toast.error(
+      error.message || "Could not save your booking. Please try again.",
+    );
     submitBtn.disabled = false;
     submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Submit Booking';
+    await renderBookingPanel(container, ctx);
     return;
   }
 

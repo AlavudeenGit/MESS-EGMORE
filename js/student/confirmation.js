@@ -1,26 +1,29 @@
 // ============================================================================
-// student/confirmation.js — "today" meal confirmation (Yes / No / No Food / Double)
+// student/confirmation.js — "today" meal confirmation (Yes / No / Double Food)
 //
-// Behavior (per bug-fix round):
+// Behavior:
 //   - Tapping an option only updates the LOCAL selection (highlights it) —
 //     no API call happens yet.
 //   - A single Submit button at the bottom sends everything that changed in
 //     one batch call.
 //   - Both selecting and submitting are only allowed inside the shared
-//     booking_open_time–booking_close_time window (default 8:30–11:30 PM).
-//     Outside that window every option is disabled and Submit is hidden.
+//     booking_open_time–booking_close_time window (default 8:30–11:30 PM),
+//     and that window is checked against the DATABASE's clock via
+//     get_meal_window_status() — not the device's clock — so changing a
+//     phone's date/time can't unlock anything. See
+//     sql/schema.sql:get_meal_window_status() / enforce_booking_write().
 // ============================================================================
 import { supabase, MEAL_TYPES, MEAL_LABELS, STATUS_LABELS } from "../config.js";
-import { todayISO, getSettings, isWithinWindow } from "../utils.js";
+import { todayISO, getServerWindowStatus, getSettings } from "../utils.js";
 import { toast } from "../components/Toast.js";
 
 export async function renderConfirmationPanel(container, ctx) {
   const today = todayISO();
-  const settings = await getSettings();
-  const windowOpen = isWithinWindow(
-    settings.booking_open_time,
-    settings.booking_close_time,
-  );
+  const [windowStatus, settings] = await Promise.all([
+    getServerWindowStatus(),
+    getSettings(),
+  ]);
+  const windowOpen = windowStatus.is_open;
 
   const { data: rows, error } = await supabase
     .from("bookings")
@@ -49,11 +52,11 @@ export async function renderConfirmationPanel(container, ctx) {
       <i class="fa-solid ${windowOpen ? "fa-clock" : "fa-lock"}"></i>
       ${
         windowOpen
-          ? `Confirm before ${formatWindowLabel(settings.booking_close_time)} tonight.`
-          : `Meal selection is only open ${formatWindowLabel(settings.booking_open_time)}–${formatWindowLabel(settings.booking_close_time)}.`
+          ? `Confirm before ${formatWindowLabel(windowStatus.window_close)} tonight.`
+          : `Meal selection is only open ${formatWindowLabel(windowStatus.window_open)}–${formatWindowLabel(windowStatus.window_close)} (server time).`
       }
     </div>
-    ${MEAL_TYPES.map((meal) => mealCardHTML(meal, byMeal[meal], selection[meal], settings, windowOpen)).join("")}
+    ${MEAL_TYPES.map((meal) => mealCardHTML(meal, byMeal[meal], selection[meal], windowOpen, settings)).join("")}
     ${windowOpen ? `<button class="btn btn-primary btn-block" id="submitConfirmation"><i class="fa-solid fa-check"></i> Submit Confirmation</button>` : ""}
   `;
 
@@ -64,22 +67,23 @@ export async function renderConfirmationPanel(container, ctx) {
   const submitBtn = container.querySelector("#submitConfirmation");
   if (submitBtn) {
     submitBtn.addEventListener("click", () =>
-      submitConfirmations(container, ctx, today, byMeal, selection, settings),
+      submitConfirmations(container, ctx, today, byMeal, selection),
     );
   }
 }
 
 function formatWindowLabel(hhmm) {
-  const [h, m] = hhmm.split(":").map(Number);
+  if (!hhmm) return "";
+  const [h, m] = String(hhmm).split(":").map(Number);
   const period = h >= 12 ? "PM" : "AM";
   const h12 = h % 12 === 0 ? 12 : h % 12;
   return `${h12}:${String(m).padStart(2, "0")} ${period}`;
 }
 
-function mealCardHTML(meal, row, selectedValue, settings, windowOpen) {
+function mealCardHTML(meal, row, selectedValue, windowOpen, settings) {
   const locked = row?.confirmation_locked || row?.cancelled_by_admin;
-  const noFoodEnabled = settings[`no_food_enabled_${meal}`] === "true";
   const bookedStatus = row?.booking_status;
+  const noFoodEnabled = settings[`no_food_enabled_${meal}`] === "true";
   const options = [
     "yes",
     "no",
@@ -132,14 +136,7 @@ function wireMealCardSelection(container, meal, row, selection, windowOpen) {
   });
 }
 
-async function submitConfirmations(
-  container,
-  ctx,
-  date,
-  byMeal,
-  selection,
-  settings,
-) {
+async function submitConfirmations(container, ctx, date, byMeal, selection) {
   const submitBtn = container.querySelector("#submitConfirmation");
   const changed = MEAL_TYPES.filter((m) => {
     const row = byMeal[m];
@@ -170,10 +167,17 @@ async function submitConfirmations(
     .upsert(payload, { onConflict: "student_id,date,meal_type" });
 
   if (error) {
-    toast.error("Could not save your confirmation. Please try again.");
+    // surface the real reason (e.g. "Meal selection window is closed" from
+    // enforce_booking_write) instead of a generic message — this matters
+    // most exactly when a tampered device clock made the UI think the
+    // window was open but the server (correctly) disagreed.
+    toast.error(
+      error.message || "Could not save your confirmation. Please try again.",
+    );
     submitBtn.disabled = false;
     submitBtn.innerHTML =
       '<i class="fa-solid fa-check"></i> Submit Confirmation';
+    await renderConfirmationPanel(container, ctx);
     return;
   }
 

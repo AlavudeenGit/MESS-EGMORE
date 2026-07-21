@@ -27,13 +27,16 @@ export const MEAL_LABELS = {
 
 export const BOOKING_OPTIONS = ["yes", "no", "double"];
 
-// confirmation options are computed at runtime based on the no_food setting
+// confirmation options — the base three plus No Food, which is only
+// offered per-meal when the admin has enabled it (see getSettings() /
+// no_food_enabled_<meal> below). booking (tomorrow) never offers No Food —
+// it's a same-day confirmation-only option.
 export const CONFIRM_BASE_OPTIONS = ["yes", "no", "double"];
 
 export const STATUS_LABELS = {
   yes: "Yes",
   no: "No",
-  double: "Double",
+  double: "Double Food",
   no_food: "No Food",
 };
 

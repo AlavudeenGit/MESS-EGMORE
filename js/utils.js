@@ -51,6 +51,47 @@ export function isPastDeadline(deadlineHHMM) {
   return currentTimeHHMM() > deadlineHHMM;
 }
 
+/**
+ * Asks the DATABASE (not the device) whether the meal selection window is
+ * open right now, via the get_meal_window_status() SQL function. This is
+ * what closes the "change my phone's clock to bypass the window" loophole
+ * at the UI layer — enforce_booking_write() in sql/schema.sql already made
+ * this impossible to bypass for the actual write (Postgres's own clock
+ * decides, unconditionally), but without this, a tampered device could
+ * still show enabled buttons that would only fail once submitted. Calling
+ * this makes the UI itself reflect the true server-side state.
+ * Falls back to the device clock only if the RPC call itself fails (e.g.
+ * offline) — enforce_booking_write() remains the real safety net either way.
+ */
+export async function getServerWindowStatus() {
+  const { data, error } = await supabase.rpc("get_meal_window_status");
+  if (error || !data || !data[0]) {
+    console.error(
+      "get_meal_window_status failed, falling back to device clock",
+      error,
+    );
+    const settings = await getSettings();
+    return {
+      is_open: isWithinWindow(
+        settings.booking_open_time,
+        settings.booking_close_time,
+      ),
+      window_open: settings.booking_open_time,
+      window_close: settings.booking_close_time,
+      fallback: true,
+    };
+  }
+  const row = data[0];
+  return {
+    is_open: row.is_open,
+    server_date: row.server_date,
+    server_time: row.server_time,
+    window_open: row.window_open,
+    window_close: row.window_close,
+    fallback: false,
+  };
+}
+
 // ---- settings cache -----------------------------------------------------------
 let _settingsCache = null;
 export async function getSettings(force = false) {

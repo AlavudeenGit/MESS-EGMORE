@@ -171,6 +171,7 @@ async function renderHome(root) {
   ]);
 
   const bookingCounts = countByMeal(todayBookings, "booking_status");
+  const confirmedCounts = countByMeal(todayConfirms, "confirmed_status");
   const totalFineAmt = sumAmount(monthFines);
   const totalExpenseAmt = sumAmount(monthExpenses);
   const totalRevenueAmt =
@@ -183,11 +184,34 @@ async function renderHome(root) {
       ${statCard({ label: "Total Students", value: totalStudents ?? 0, icon: "fa-users" })}
       ${statCard({ label: "Active", value: activeStudents ?? 0, icon: "fa-user-check" })}
       ${statCard({ label: "Pending Registrations", value: pendingRegs ?? 0, icon: "fa-user-clock" })}
-      ${statCard({ label: "Today's Bookings", value: `${bookingCounts.breakfast}/${bookingCounts.lunch}/${bookingCounts.dinner}`, icon: "fa-utensils" })}
       ${statCard({ label: "Fine Collection (mo.)", value: currency(totalFineAmt), icon: "fa-coins" })}
       ${statCard({ label: "Monthly Revenue", value: currency(totalRevenueAmt), icon: "fa-arrow-trend-up" })}
       ${statCard({ label: "Monthly Expenses", value: currency(totalExpenseAmt), icon: "fa-arrow-trend-down" })}
       ${statCard({ label: "Profit / Loss", value: currency(profit), icon: "fa-scale-balanced" })}
+    </div>
+
+    <div class="card">
+      <h3>Today's Meals <span class="badge badge-locked">${formatDate(today)}</span></h3>
+      <p class="text-soft" style="font-size:12px;margin-bottom:10px;">Same numbers as Admin → Meal Entries for today — both read the exact same data, so they can't drift apart.</p>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th></th><th>Breakfast</th><th>Lunch</th><th>Dinner</th></tr></thead>
+          <tbody>
+            <tr>
+              <td data-label="">Booked</td>
+              <td data-label="Breakfast">${bookingCounts.breakfast}</td>
+              <td data-label="Lunch">${bookingCounts.lunch}</td>
+              <td data-label="Dinner">${bookingCounts.dinner}</td>
+            </tr>
+            <tr>
+              <td data-label="">Confirmed</td>
+              <td data-label="Breakfast">${confirmedCounts.breakfast}</td>
+              <td data-label="Lunch">${confirmedCounts.lunch}</td>
+              <td data-label="Dinner">${confirmedCounts.dinner}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div class="chart-grid">

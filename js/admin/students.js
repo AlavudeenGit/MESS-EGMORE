@@ -101,7 +101,13 @@ export async function renderStudents(root) {
     document
       .querySelectorAll('[data-act="delete"]')
       .forEach(
-        (btn) => (btn.onclick = () => deleteStudent(btn.dataset.id, load)),
+        (btn) =>
+          (btn.onclick = () =>
+            deleteStudent(
+              btn.dataset.id,
+              rows.find((r) => r.id === btn.dataset.id)?.name || "this student",
+              load,
+            )),
       );
   }
 
@@ -225,21 +231,21 @@ async function toggleStatus(student, onDone) {
   onDone();
 }
 
-async function deleteStudent(id, onDone) {
+async function deleteStudent(id, name, onDone) {
   const ok = await confirmDialog(
-    "This will permanently remove the student record. This cannot be undone from the UI. Continue?",
-    { confirmLabel: "Delete" },
+    `PERMANENTLY delete ${name}? This removes their account and every booking, fine, and payment record — it cannot be undone. If you just want to disable their login while keeping their history, use Deactivate instead.`,
+    { confirmLabel: "Permanently Delete" },
   );
   if (!ok) return;
-  // Soft-delete preferred (per spec: "no hard deletes"); we mark inactive + tag record instead of removing.
-  const { error } = await supabase
-    .from("students")
-    .update({ status: "inactive" })
-    .eq("id", id);
-  if (error) {
-    toast.error("Could not remove student");
+
+  const { data, error } = await supabase.functions.invoke(
+    "admin-delete-student",
+    { body: { student_id: id } },
+  );
+  if (error || !data?.ok) {
+    toast.error(data?.error || error?.message || "Could not delete student");
     return;
   }
-  toast.success("Student deactivated (soft-deleted — history preserved)");
+  toast.success(`${name} permanently deleted`);
   onDone();
 }
