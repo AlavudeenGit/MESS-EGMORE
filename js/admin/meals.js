@@ -27,7 +27,7 @@ export async function renderMeals(root) {
 
     <div class="card">
       <h3>Today's Meal Entries <span class="badge badge-locked">${formatDate(today)}</span></h3>
-      <p class="text-soft" style="font-size:13px;">Overrides only apply to today — there's no way to edit a past or future date from here.</p>
+      <p class="text-soft" style="font-size:13px;">Overrides only apply to today — there's no way to edit a past or future date from here. Only students with at least one meal booked Yes/Double are listed; students who booked No for all three (or booked nothing) are hidden.</p>
       <div class="filter-bar">
         <input type="text" id="filterName" placeholder="Search name or room…">
       </div>
@@ -64,6 +64,14 @@ export async function renderMeals(root) {
     });
 
     let rows = Object.values(byStudent);
+    // only show students with at least one meal actually booked (yes/double)
+    // — a student who booked "No" for all three (or booked nothing at all)
+    // has nothing for the kitchen to act on today, so hide them here
+    rows = rows.filter((r) =>
+      MEAL_TYPES.some((m) =>
+        ["yes", "double"].includes(r.meals[m]?.booking_status),
+      ),
+    );
     if (state.search) {
       rows = rows.filter(
         (r) =>
@@ -91,7 +99,7 @@ export async function renderMeals(root) {
     document.getElementById("mealsTable").innerHTML = renderTable(
       columns,
       rows,
-      { emptyMessage: "No bookings for today" },
+      { emptyMessage: "No students have booked any meal for today yet" },
     );
     document.querySelectorAll('[data-act="edit"]').forEach(
       (b) =>
