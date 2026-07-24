@@ -157,7 +157,7 @@ function mealCardHTML(meal, row, selectedValue, windowOpen, settings) {
         <span class="meal-name">${MEAL_LABELS[meal]}</span>
         ${bookedStatus ? `<span class="badge badge-${bookedStatus}">Booked: ${STATUS_LABELS[bookedStatus]}</span>` : '<span class="badge badge-locked">Not booked</span>'}
       </div>
-      <div class="option-group">
+      <div class="option-group option-group--confirmation">
         ${options
           .map(
             (opt) => `

@@ -434,13 +434,22 @@ img {
 .option-group.option-group--4 {
   grid-template-columns: repeat(2, 1fr);
 }
+.option-group.option-group--confirmation {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 .option-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: var(--tap-min);
+  padding: 8px 10px;
   border-radius: var(--radius-sm);
   border: 1.5px solid var(--color-border);
   background: var(--color-surface);
   font-weight: 700;
   font-size: 13px;
+  line-height: 1.15;
+  text-align: center;
   cursor: pointer;
   color: var(--color-ink-soft);
   transition: all var(--dur-fast) var(--ease);
