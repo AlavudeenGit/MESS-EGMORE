@@ -4,11 +4,23 @@
 // SAME shared window as lock-bookings now uses (confirmation and tomorrow's
 // booking share one evening window, e.g. 8:30–11:30 PM; see
 // enforce_booking_write() in sql/schema.sql and js/student/confirmation.js).
+//
+// A meal is only student-editable in Today's Confirmation when No Food is
+// enabled for it (Admin -> Settings). When it's disabled — the default —
+// the meal is pre-filled from yesterday's booking and the student can't
+// touch it at all, so THIS function is what actually finalizes it: for any
+// meal where No Food is off and confirmed_status is still null, it copies
+// booking_status into confirmed_status before locking, so the day's fine
+// calculation sees a real confirmed value instead of "never confirmed."
+//
 // For every active student x meal_type, for today's date:
+//   - auto-copy booking_status -> confirmed_status where No Food is disabled
+//     and nothing has been confirmed yet
 //   - lock any existing row (confirmation_locked = true)
-//   - if a student booked yes/double but the row has no confirmed_status,
-//     leave confirmed_status null but lock it — recompute_daily_fine()
-//     reads exactly that combination to apply the ₹100 fine.
+//   - if a student booked yes/double, No Food IS enabled for that meal, and
+//     they still never confirmed anything, leave confirmed_status null but
+//     lock it — recompute_daily_fine() reads exactly that combination to
+//     apply the ₹100 fine.
 // Then calls recompute_daily_fine(student_id, today) for every active
 // student so fines are finalized for the day.
 // Not exposed to the browser — invoke via pg_cron (see supabase/CRON.md).
@@ -38,9 +50,25 @@ Deno.serve(async (req) => {
       .eq("status", "active");
     if (studentsError) throw studentsError;
 
+    const { data: settingsRows, error: settingsError } = await supabase
+      .from("settings")
+      .select("key, value")
+      .in(
+        "key",
+        MEAL_TYPES.map((m) => `no_food_enabled_${m}`),
+      );
+    if (settingsError) throw settingsError;
+    const noFoodEnabled = {};
+    MEAL_TYPES.forEach((m) => {
+      noFoodEnabled[m] = false;
+    });
+    (settingsRows || []).forEach((r) => {
+      noFoodEnabled[r.key.replace("no_food_enabled_", "")] = r.value === "true";
+    });
+
     const { data: existingRows, error: existingError } = await supabase
       .from("bookings")
-      .select("id, student_id, meal_type, booking_status")
+      .select("id, student_id, meal_type, booking_status, confirmed_status")
       .eq("date", today);
     if (existingError) throw existingError;
 
@@ -48,6 +76,31 @@ Deno.serve(async (req) => {
       (existingRows || []).map((r) => `${r.student_id}:${r.meal_type}`),
     );
     const existingIds = (existingRows || []).map((r) => r.id);
+
+    // auto-copy booking_status -> confirmed_status for meals the student
+    // was never allowed to touch (No Food disabled), so they're treated as
+    // confirmed exactly as booked rather than "never confirmed"
+    let autoConfirmed = 0;
+    for (const row of existingRows || []) {
+      if (
+        row.confirmed_status === null &&
+        !noFoodEnabled[row.meal_type] &&
+        row.booking_status !== null
+      ) {
+        const { error } = await supabase
+          .from("bookings")
+          .update({
+            confirmed_status: row.booking_status,
+            confirmed_at: new Date().toISOString(),
+          })
+          .eq("id", row.id);
+        if (error) {
+          console.error("auto-confirm failed for booking", row.id, error);
+          continue;
+        }
+        autoConfirmed++;
+      }
+    }
 
     if (existingIds.length) {
       const { error } = await supabase
@@ -102,6 +155,7 @@ Deno.serve(async (req) => {
       JSON.stringify({
         ok: true,
         date: today,
+        autoConfirmed,
         locked: existingIds.length,
         defaulted: missing.length,
         recomputed: fined,

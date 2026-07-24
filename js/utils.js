@@ -221,6 +221,80 @@ export function printElement(elementId) {
   setTimeout(() => w.print(), 300);
 }
 
+/**
+ * Same as exportToExcel, but prepends a small summary section (the same
+ * figures shown in the on-screen summary cards) so the downloaded file
+ * matches what the admin actually sees, not just the raw table.
+ * summaryPairs: [{ label, value }] or null/[] to skip the summary section.
+ */
+export function exportToExcelWithSummary(
+  summaryPairs,
+  rows,
+  filename = "export",
+) {
+  if (!rows || !rows.length) {
+    return;
+  }
+  const wb = window.XLSX.utils.book_new();
+  const aoa = [];
+  if (summaryPairs && summaryPairs.length) {
+    summaryPairs.forEach((p) => aoa.push([p.label, p.value]));
+    aoa.push([]); // blank separator row before the table
+  }
+  const ws = window.XLSX.utils.aoa_to_sheet(aoa);
+  window.XLSX.utils.sheet_add_json(ws, rows, {
+    origin: aoa.length ? -1 : 0,
+    skipHeader: false,
+  });
+  window.XLSX.utils.book_append_sheet(wb, ws, "Report");
+  window.XLSX.writeFile(wb, `${filename}.xlsx`);
+}
+
+/**
+ * Same as exportToPDF, but writes the summary figures as text lines above
+ * the table, for the same reason as exportToExcelWithSummary above.
+ */
+export function exportToPDFWithSummary(
+  summaryPairs,
+  columns,
+  rows,
+  title = "Report",
+  filename = "export",
+) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({
+    orientation: columns.length > 6 ? "landscape" : "portrait",
+  });
+  doc.setFontSize(14);
+  doc.text(title, 14, 16);
+  doc.setFontSize(9);
+  doc.text(`Generated ${new Date().toLocaleString("en-IN")}`, 14, 22);
+
+  let y = 28;
+  if (summaryPairs && summaryPairs.length) {
+    doc.setFontSize(10);
+    summaryPairs.forEach((p) => {
+      doc.text(`${p.label}: ${p.value}`, 14, y);
+      y += 6;
+    });
+    y += 2;
+    doc.setFontSize(9);
+  }
+
+  const head = [columns.map((c) => c.label)];
+  const body = rows.map((r) => columns.map((c) => String(r[c.key] ?? "")));
+
+  if (doc.autoTable) {
+    doc.autoTable({ head, body, startY: y, styles: { fontSize: 8 } });
+  } else {
+    body.forEach((row) => {
+      doc.text(row.join(" | "), 14, y);
+      y += 6;
+    });
+  }
+  doc.save(`${filename}.pdf`);
+}
+
 // ---- session guard -----------------------------------------------------------------
 /**
  * Ensures a logged-in session exists and that the user has the expected role.

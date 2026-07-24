@@ -655,6 +655,30 @@ img {
   overflow-x: auto;
 }
 
+/* flat mode: forces a genuine table (thead visible, rows as table-rows,
+   scrolling horizontally on narrow screens) instead of the stacked-card
+   view above. Used for Meal Entries per an explicit "table view on both
+   desktop and mobile" requirement — scanning many students quickly is
+   easier as one scrollable table than as tap-through cards. */
+.data-table--flat thead {
+  display: table-header-group;
+}
+.data-table--flat tbody tr {
+  display: table-row;
+  margin: 0;
+  border-radius: 0;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  padding: 0;
+}
+.data-table--flat td {
+  display: table-cell;
+  padding: var(--space-3);
+}
+.data-table--flat td::before {
+  content: none;
+}
+
 /* ---- modal ------------------------------------------------------------------ */
 .modal-overlay {
   position: fixed;

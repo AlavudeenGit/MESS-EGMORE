@@ -214,11 +214,6 @@ async function renderHome(root) {
       </div>
     </div>
 
-    <div class="chart-grid">
-      <div class="card chart-card"><h4>Meal Booking Trend (7 days)</h4><canvas id="chartBookings" height="180"></canvas></div>
-      <div class="card chart-card"><h4>Expense Breakdown (this month)</h4><canvas id="chartExpenses" height="180"></canvas></div>
-    </div>
-
     <div class="card">
       <h3>Recent Activity</h3>
       <div class="activity-feed">
@@ -227,9 +222,6 @@ async function renderHome(root) {
       </div>
     </div>
   `;
-
-  drawBookingTrend();
-  drawExpensePie(monthExpenses);
 }
 
 function activityRow(icon, text, when) {
@@ -248,88 +240,6 @@ function countByMeal(rows, field) {
 }
 function sumAmount(rows) {
   return (rows || []).reduce((s, r) => s + Number(r.amount || 0), 0);
-}
-
-async function drawBookingTrend() {
-  const days = [...Array(7)].map((_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
-    return d.toISOString().slice(0, 10);
-  });
-  const { data } = await supabase
-    .from("bookings")
-    .select("date, booking_status")
-    .in("date", days);
-  const counts = days.map(
-    (d) =>
-      (data || []).filter(
-        (r) => r.date === d && r.booking_status && r.booking_status !== "no",
-      ).length,
-  );
-  const ctxEl = document.getElementById("chartBookings");
-  if (!ctxEl || !window.Chart) return;
-  new Chart(ctxEl, {
-    type: "line",
-    data: {
-      labels: days.map((d) =>
-        formatDate(d, { month: "short", day: "2-digit", year: undefined }),
-      ),
-      datasets: [
-        {
-          label: "Bookings",
-          data: counts,
-          borderColor: "#2F5233",
-          backgroundColor: "rgba(47,82,51,0.12)",
-          fill: true,
-          tension: 0.35,
-        },
-      ],
-    },
-    options: {
-      plugins: { legend: { display: false } },
-      scales: { y: { beginAtZero: true } },
-    },
-  });
-}
-
-function drawExpensePie(monthExpenses) {
-  const byCat = {};
-  (monthExpenses || []).forEach((e) => {
-    byCat[e.category] = (byCat[e.category] || 0) + Number(e.amount);
-  });
-  const ctxEl = document.getElementById("chartExpenses");
-  if (!ctxEl || !window.Chart) return;
-  const labels = Object.keys(byCat).map((k) => EXPENSE_CATEGORY_LABELS[k] || k);
-  new Chart(ctxEl, {
-    type: "doughnut",
-    data: {
-      labels,
-      datasets: [
-        {
-          data: Object.values(byCat),
-          backgroundColor: [
-            "#2F5233",
-            "#E4A72E",
-            "#C0392B",
-            "#7A4FAE",
-            "#8A8578",
-            "#6FA97A",
-            "#B392DE",
-            "#3B342C",
-            "#E5786A",
-          ],
-        },
-      ],
-    },
-    options: {
-      plugins: {
-        legend: {
-          position: "bottom",
-          labels: { boxWidth: 10, font: { size: 11 } },
-        },
-      },
-    },
-  });
 }
 
 boot();

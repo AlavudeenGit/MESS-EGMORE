@@ -303,15 +303,6 @@ begin
     raise exception 'Cannot write another student''s booking';
   end if;
 
-  -- No Food is only a valid confirmed_status when the admin has enabled it
-  -- for that specific meal (Admin -> Settings -> No Food Option).
-  if new.confirmed_status = 'no_food' then
-    select value = 'true' into v_no_food_enabled from settings where key = 'no_food_enabled_' || new.meal_type;
-    if not coalesce(v_no_food_enabled, false) then
-      raise exception 'No Food is not enabled for %', new.meal_type;
-    end if;
-  end if;
-
   -- protected columns: a student can never set these directly, no matter
   -- what the API call contains
   new.fine_amount := coalesce(old.fine_amount, 0);
@@ -353,7 +344,15 @@ begin
 
   -- confirmed_status: only for today, only inside the SAME shared window
   -- (booking_open_time–booking_close_time), only while unlocked; locks
-  -- immediately on submission (matches spec: "locked and cannot be modified")
+  -- immediately on submission (matches spec: "locked and cannot be modified").
+  --
+  -- ALSO: a student may only write confirmed_status at all when No Food is
+  -- enabled for that specific meal. When it's disabled (the default), the
+  -- meal is pre-filled from yesterday's booking and is NOT editable by the
+  -- student in any way — the nightly lock-confirmations sweep copies
+  -- booking_status into confirmed_status automatically for those meals
+  -- (see supabase/functions/lock-confirmations), so this never falsely
+  -- triggers the "no confirmation submitted" fine.
   if new.confirmed_status is distinct from old.confirmed_status then
     if new.date <> current_date then
       raise exception 'Confirmation is only accepted for today''s date';
@@ -363,6 +362,10 @@ begin
     end if;
     if not v_within_window then
       raise exception 'Meal selection window is closed';
+    end if;
+    select value = 'true' into v_no_food_enabled from settings where key = 'no_food_enabled_' || new.meal_type;
+    if not coalesce(v_no_food_enabled, false) then
+      raise exception 'This meal is locked to your booking — No Food is not enabled for %, so it is not editable', new.meal_type;
     end if;
     new.confirmation_locked := true;
     new.confirmed_at := now();

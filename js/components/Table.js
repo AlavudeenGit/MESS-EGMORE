@@ -2,12 +2,15 @@
 // Table.js — generic data table renderer.
 // Renders as a real <table> (card-per-row on mobile is handled purely in
 // CSS via td::before { content: attr(data-label) }, see .data-table rules).
+// Pass opts.flat = true to keep a genuine horizontally-scrolling table on
+// mobile instead of the stacked-card view — used for Meal Entries, where
+// the admin needs to scan rows quickly rather than tap through cards.
 // ============================================================================
 
 /**
  * columns: [{ key, label, render?: (row) => string }]
  * rows: array of plain objects
- * opts: { emptyMessage }
+ * opts: { emptyMessage, flat }
  */
 export function renderTable(columns, rows, opts = {}) {
   if (!rows || !rows.length) {
@@ -27,7 +30,8 @@ export function renderTable(columns, rows, opts = {}) {
   `,
     )
     .join("")}</tbody>`;
-  return `<div class="table-wrap"><table class="data-table">${thead}${tbody}</table></div>`;
+  const tableClass = opts.flat ? "data-table data-table--flat" : "data-table";
+  return `<div class="table-wrap"><table class="${tableClass}">${thead}${tbody}</table></div>`;
 }
 
 /** injects the table into a container element by id or Element */

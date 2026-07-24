@@ -288,6 +288,56 @@ auth login via the service role key, which cascades to remove their
 unchanged — it still just flips `status` to `inactive` and keeps
 everything.
 
+## Dashboard/Reports/Meal-Entries restructure + locked Today's Confirmation
+
+**Dashboard** — removed the "Meal Booking Trend (7 days)" and "Expense
+Breakdown (this month)" charts (and the now-unused Chart.js include).
+Everything else — summary cards, activity feed — unchanged.
+
+**Reports reduced to 6 types**: Students Report (with Breakfast/Lunch/
+Dinner totals for the current month), Daily Attendance Report, Fine
+Report, Tomorrow Booking Report, Expense Report, Grocery Report. Daily
+Attendance, Fine, and Tomorrow Booking now show summary cards above the
+table (Total Breakfast/Lunch/Dinner Count, Total Fine Amount, Total
+Breakfast/Lunch/Dinner Bookings respectively) — Fine Report also groups
+by student, so "Fine Date(s)" lists every date they were charged with a
+single total amount, instead of one row per fine event. **Every export
+(Excel/PDF) now includes those same summary figures**, not just the raw
+table — see `exportToExcelWithSummary`/`exportToPDFWithSummary` in
+`utils.js`.
+
+**Meal Entries restructured**: six summary cards at the top (Today's
+Meals + Tomorrow's Bookings, Breakfast/Lunch/Dinner each), then "Today's
+Meal Marking" (editable — same booking-only, today-only override modal
+as before) shown first, then a read-only "Tomorrow Booking" table below
+it. Both tables render in a new "flat" mode
+(`renderTable(..., { flat: true })` / `.data-table--flat` in
+`css/main.css`) that keeps a real horizontally-scrolling table on mobile
+instead of the stacked-card view used elsewhere in the app, per an
+explicit "same table on desktop and mobile" requirement. Both still only
+list students with at least one meal booked Yes/Double.
+
+**Today's Confirmation is now pre-filled and locked by default.** A
+meal shows exactly what was booked yesterday and can't be touched at
+all — UNLESS the admin has enabled No Food for that specific meal
+(Admin → Settings → No Food Option), in which case the usual Yes/No/No
+Food/Double option group appears, editable as before. This isn't just a
+UI restriction: the database trigger (`enforce_booking_write` in
+`sql/schema.sql`) rejects any `confirmed_status` write from a student for
+a meal where No Food is disabled, full stop. The one thing this changes
+underneath: since a locked meal's `confirmed_status` would otherwise stay
+null forever (nobody's allowed to set it), the nightly
+`lock-confirmations` Edge Function now auto-copies `booking_status` into
+`confirmed_status` for any such meal before locking and running the fine
+sweep — so the ₹100 "never confirmed" fine still only fires when it's
+supposed to (a booked meal where No Food _was_ available and the student
+genuinely never acted), not every day for every student by default.
+**Redeploy `lock-confirmations` after applying
+`sql/PATCH_2026-07-24_locked_confirmation.sql`** to a live database, or
+the trigger and the nightly job will disagree with each other.
+`js/student/booking.js` (tomorrow's booking) is untouched, exactly as
+asked.
+
 ## Not yet wired up (clearly-scoped follow-ups)
 
 - Image/bill uploads for expenses (`expenses.bill_url` column exists;

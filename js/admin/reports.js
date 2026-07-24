@@ -1,118 +1,76 @@
 // ============================================================================
-// admin/reports.js — one generic report builder covering every report type
-// in the spec: Student, Active/Inactive, Daily Attendance, Fine, Breakfast/
-// Lunch/Dinner, Booking, Confirmation, Monthly Payment, Grocery, Expense,
-// Revenue, Profit/Loss. Each report type defines its own `fetch(filters)`
-// and `columns`; the surrounding filter bar, search, and export buttons
-// are shared.
+// admin/reports.js — reduced to the 6 report types below. Every report
+// returns { rows, summary } from its fetch() — summary (an array of
+// { label, value } pairs, or empty) is rendered as cards above the table
+// AND passed into the export functions, so the downloaded Excel/PDF file
+// always shows the exact same figures as the screen, not just the raw rows.
 // ============================================================================
 import {
   supabase,
   MEAL_TYPES,
-  MEAL_LABELS,
   STATUS_LABELS,
   EXPENSE_CATEGORY_LABELS,
 } from "../config.js";
 import {
   formatDate,
   currency,
-  exportToExcel,
-  exportToPDF,
   todayISO,
+  tomorrowISO,
+  exportToExcelWithSummary,
+  exportToPDFWithSummary,
 } from "../utils.js";
 import { renderTable } from "../components/Table.js";
+import { statCard } from "../components/Card.js";
 
 const REPORT_TYPES = {
   student: {
-    label: "Student Report",
-    fetch: fetchStudents,
-    columns: studentColumns(),
-  },
-  active_inactive: {
-    label: "Active / Inactive Report",
-    fetch: fetchStudents,
+    label: "Students Report",
+    filters: ["search"],
+    fetch: fetchStudentsReport,
     columns: studentColumns(),
   },
   attendance: {
     label: "Daily Attendance Report",
-    fetch: fetchAttendance,
+    filters: ["search", "date"],
+    fetch: fetchAttendanceReport,
     columns: attendanceColumns(),
   },
-  fine: { label: "Fine Report", fetch: fetchFines, columns: fineColumns() },
-  breakfast: {
-    label: "Breakfast Report",
-    fetch: (f) => fetchMealReport(f, "breakfast"),
-    columns: mealColumns(),
+  fine: {
+    label: "Fine Report",
+    filters: ["search", "month", "from", "to"],
+    fetch: fetchFineReport,
+    columns: fineColumns(),
   },
-  lunch: {
-    label: "Lunch Report",
-    fetch: (f) => fetchMealReport(f, "lunch"),
-    columns: mealColumns(),
-  },
-  dinner: {
-    label: "Dinner Report",
-    fetch: (f) => fetchMealReport(f, "dinner"),
-    columns: mealColumns(),
-  },
-  booking: {
-    label: "Booking Report",
-    fetch: fetchBookingReport,
-    columns: bookingColumns(),
-  },
-  confirmation: {
-    label: "Confirmation Report",
-    fetch: fetchConfirmationReport,
-    columns: confirmationColumns(),
-  },
-  payment: {
-    label: "Monthly Payment Report",
-    fetch: fetchPaymentReport,
-    columns: paymentColumns(),
-  },
-  grocery: {
-    label: "Grocery Report",
-    fetch: (f) => fetchExpenseReport(f, "grocery"),
-    columns: expenseColumns(),
+  tomorrow_booking: {
+    label: "Tomorrow Booking Report",
+    filters: ["search"],
+    fetch: fetchTomorrowBookingReport,
+    columns: tomorrowBookingColumns(),
   },
   expense: {
     label: "Expense Report",
+    filters: ["month", "from", "to"],
     fetch: (f) => fetchExpenseReport(f, null),
     columns: expenseColumns(),
   },
-  revenue: {
-    label: "Revenue Report",
-    fetch: fetchRevenueReport,
-    columns: revenueColumns(),
-  },
-  profit_loss: {
-    label: "Profit / Loss Report",
-    fetch: fetchProfitLossReport,
-    columns: profitLossColumns(),
+  grocery: {
+    label: "Grocery Report",
+    filters: ["month", "from", "to"],
+    fetch: (f) => fetchExpenseReport(f, "grocery"),
+    columns: expenseColumns(),
   },
 };
 
-// reports that filter by a single specific day (not a month/range)
-const SINGLE_DATE_REPORTS = new Set(["attendance"]);
-
 const REPORT_HINTS = {
-  student: "All registered students (search by name/room).",
-  active_inactive: "All students with their current status.",
+  student:
+    "All registered students, with Breakfast/Lunch/Dinner totals for the current month.",
   attendance:
     "Only students who submitted a confirmation on the selected date.",
-  fine: "Every fine charged, filterable by month or date range.",
-  breakfast:
-    "Every breakfast booking/confirmation, filterable by month or date range.",
-  lunch: "Every lunch booking/confirmation, filterable by month or date range.",
-  dinner:
-    "Every dinner booking/confirmation, filterable by month or date range.",
-  booking: "Every meal a student booked, filterable by month or date range.",
-  confirmation:
-    "Every meal a student confirmed, filterable by month or date range.",
-  payment: "Mess payment status per student for the selected month.",
-  grocery: "Grocery expenses, filterable by month or date range.",
+  fine: "Every fine charged, grouped per student. Filter by month or a date range.",
+  tomorrow_booking:
+    "Tomorrow's bookings — students with at least one meal booked Yes/Double.",
   expense: "All expenses, filterable by month or date range.",
-  revenue: "Last 6 months of payments + fine collection.",
-  profit_loss: "Last 6 months of revenue vs. expenses.",
+  grocery: "Grocery expenses only, filterable by month or date range.",
 };
 
 export async function renderReports(root) {
@@ -126,13 +84,14 @@ export async function renderReports(root) {
       </div>
       <div class="filter-bar">
         <input type="text" id="reportSearch" placeholder="Search…">
-        <input type="date" id="reportDate" style="display:none;" title="Date">
+        <input type="date" id="reportDate" title="Date">
         <input type="month" id="reportMonth">
         <input type="date" id="reportFrom" title="From date">
         <input type="date" id="reportTo" title="To date">
       </div>
       <p class="text-soft" id="reportHint" style="font-size:12px;margin:8px 0 0;"></p>
     </div>
+    <div id="reportSummary" class="card-grid"></div>
     <div class="report-toolbar">
       <button class="btn btn-secondary btn-sm" id="exportExcel"><i class="fa-solid fa-file-excel"></i> Excel</button>
       <button class="btn btn-secondary btn-sm" id="exportPdf"><i class="fa-solid fa-file-pdf"></i> PDF</button>
@@ -143,23 +102,38 @@ export async function renderReports(root) {
 
   let lastRows = [];
   let lastColumns = [];
+  let lastSummary = [];
 
   function syncFilterVisibility() {
     const type = document.getElementById("reportType").value;
-    const isSingleDate = SINGLE_DATE_REPORTS.has(type);
-    document.getElementById("reportDate").style.display = isSingleDate
+    const active = REPORT_TYPES[type].filters;
+    document.getElementById("reportSearch").style.display = active.includes(
+      "search",
+    )
       ? ""
       : "none";
-    document.getElementById("reportMonth").style.display = isSingleDate
-      ? "none"
-      : "";
-    document.getElementById("reportFrom").style.display = isSingleDate
-      ? "none"
-      : "";
-    document.getElementById("reportTo").style.display = isSingleDate
-      ? "none"
-      : "";
-    if (isSingleDate && !document.getElementById("reportDate").value) {
+    document.getElementById("reportDate").style.display = active.includes(
+      "date",
+    )
+      ? ""
+      : "none";
+    document.getElementById("reportMonth").style.display = active.includes(
+      "month",
+    )
+      ? ""
+      : "none";
+    document.getElementById("reportFrom").style.display = active.includes(
+      "from",
+    )
+      ? ""
+      : "none";
+    document.getElementById("reportTo").style.display = active.includes("to")
+      ? ""
+      : "none";
+    if (
+      active.includes("date") &&
+      !document.getElementById("reportDate").value
+    ) {
       document.getElementById("reportDate").value = todayISO();
     }
   }
@@ -180,13 +154,23 @@ export async function renderReports(root) {
     };
     document.getElementById("reportHint").textContent =
       REPORT_HINTS[type] || "";
+    document.getElementById("reportSummary").innerHTML = "";
     document.getElementById("reportOutput").innerHTML =
       `<div class="skeleton" style="height:200px;border-radius:16px;"></div>`;
-    const rows = await def.fetch(filters);
+
+    const { rows, summary } = await def.fetch(filters);
     lastRows = rows;
     lastColumns = def.columns;
-    document.getElementById("reportOutput").innerHTML =
-      `<div id="reportTableWrap">${renderTable(def.columns, rows, { emptyMessage: "No data for this filter" })}</div>`;
+    lastSummary = summary || [];
+
+    document.getElementById("reportSummary").innerHTML = lastSummary
+      .map((s) => statCard({ label: s.label, value: s.value, icon: s.icon }))
+      .join("");
+    document.getElementById("reportOutput").innerHTML = renderTable(
+      def.columns,
+      rows,
+      { emptyMessage: "No data for this filter" },
+    );
   }
 
   document.getElementById("reportType").addEventListener("change", load);
@@ -197,13 +181,23 @@ export async function renderReports(root) {
   document.getElementById("reportTo").addEventListener("change", load);
 
   document.getElementById("exportExcel").addEventListener("click", () => {
-    exportToExcel(
+    const summaryPairs = lastSummary.map((s) => ({
+      label: s.label,
+      value: s.value,
+    }));
+    exportToExcelWithSummary(
+      summaryPairs,
       lastRows.map((r) => flattenForExport(lastColumns, r)),
       `report-${document.getElementById("reportType").value}`,
     );
   });
   document.getElementById("exportPdf").addEventListener("click", () => {
-    exportToPDF(
+    const summaryPairs = lastSummary.map((s) => ({
+      label: s.label,
+      value: s.value,
+    }));
+    exportToPDFWithSummary(
+      summaryPairs,
       lastColumns.map((c) => ({ key: c.key, label: c.label })),
       lastRows.map((r) => flattenForExport(lastColumns, r)),
       REPORT_TYPES[document.getElementById("reportType").value].label,
@@ -227,43 +221,36 @@ function flattenForExport(columns, row) {
   return out;
 }
 
-// ---- report definitions -----------------------------------------------------
-
+// ---- 1. Students Report ------------------------------------------------------
 function studentColumns() {
   return [
-    { key: "name", label: "Name" },
-    { key: "room_number", label: "Room" },
-    { key: "mobile", label: "Mobile" },
+    { key: "name", label: "Student Name" },
+    { key: "room_number", label: "Room No" },
     { key: "email", label: "Email" },
-    { key: "status", label: "Status", render: (r) => r.status },
-    {
-      key: "joined_at",
-      label: "Joined",
-      render: (r) => formatDate(r.joined_at),
-    },
-    // meal-count columns, computed for whatever date filter is selected
-    // (month, or from/to range; defaults to all-time if none set)
+    { key: "mobile", label: "Mobile Number" },
     {
       key: "breakfastCount",
-      label: "Breakfast Count",
+      label: "Total Breakfast (This Month)",
       render: (r) => r.breakfastCount ?? 0,
     },
     {
       key: "lunchCount",
-      label: "Lunch Count",
+      label: "Total Lunch (This Month)",
       render: (r) => r.lunchCount ?? 0,
     },
     {
       key: "dinnerCount",
-      label: "Dinner Count",
+      label: "Total Dinner (This Month)",
       render: (r) => r.dinnerCount ?? 0,
     },
   ];
 }
-async function fetchStudents(f) {
-  let q = supabase.from("students").select("*").neq("status", "pending");
-  const { data } = await q;
-  let rows = data || [];
+async function fetchStudentsReport(f) {
+  const { data: students } = await supabase
+    .from("students")
+    .select("*")
+    .neq("status", "pending");
+  let rows = students || [];
   if (f.search)
     rows = rows.filter(
       (r) =>
@@ -271,14 +258,18 @@ async function fetchStudents(f) {
         r.room_number.toLowerCase().includes(f.search),
     );
 
-  // meal counts for the selected date filter (confirmed yes/double only —
-  // matches "how many times did they actually eat", not just book)
-  let bookingQuery = supabase
+  const now = new Date();
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+    .toISOString()
+    .slice(0, 10);
+
+  const { data: mealRows } = await supabase
     .from("bookings")
     .select("student_id, meal_type, confirmed_status")
-    .in("confirmed_status", ["yes", "double"]);
-  bookingQuery = applyDateFilters(bookingQuery, f);
-  const { data: mealRows } = await bookingQuery;
+    .in("confirmed_status", ["yes", "double"])
+    .gte("date", monthStart)
+    .lte("date", monthEnd);
 
   const countsByStudent = {};
   (mealRows || []).forEach((r) => {
@@ -290,20 +281,24 @@ async function fetchStudents(f) {
     countsByStudent[r.student_id][r.meal_type]++;
   });
 
-  rows = rows.map((r) => ({
-    ...r,
-    breakfastCount: countsByStudent[r.id]?.breakfast || 0,
-    lunchCount: countsByStudent[r.id]?.lunch || 0,
-    dinnerCount: countsByStudent[r.id]?.dinner || 0,
-  }));
+  rows = rows
+    .map((r) => ({
+      ...r,
+      breakfastCount: countsByStudent[r.id]?.breakfast || 0,
+      lunchCount: countsByStudent[r.id]?.lunch || 0,
+      dinnerCount: countsByStudent[r.id]?.dinner || 0,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
-  return rows;
+  return { rows, summary: [] };
 }
 
+// ---- 2. Daily Attendance Report -----------------------------------------------
 function attendanceColumns() {
   return [
-    { key: "name", label: "Name" },
-    { key: "room", label: "Room" },
+    { key: "name", label: "Student Name" },
+    { key: "room", label: "Room No" },
+    { key: "status", label: "Today's Status" },
     {
       key: "breakfast",
       label: "Breakfast",
@@ -330,10 +325,8 @@ function attendanceColumns() {
     },
   ];
 }
-async function fetchAttendance(f) {
+async function fetchAttendanceReport(f) {
   const date = f.date || todayISO();
-  // "only students who marked their attendance" = at least one confirmed_status
-  // for that date; students with zero confirmations that day are excluded entirely
   const { data, error } = await supabase
     .from("bookings")
     .select(
@@ -341,7 +334,7 @@ async function fetchAttendance(f) {
     )
     .eq("date", date)
     .not("confirmed_status", "is", null);
-  if (error || !data) return [];
+  if (error || !data) return { rows: [], summary: [] };
 
   const byStudent = {};
   data.forEach((r) => {
@@ -355,7 +348,18 @@ async function fetchAttendance(f) {
     byStudent[r.student_id][r.meal_type] = r.confirmed_status;
   });
 
-  let rows = Object.values(byStudent);
+  let rows = Object.values(byStudent).map((r) => {
+    const eatenCount = MEAL_TYPES.filter((m) =>
+      ["yes", "double"].includes(r[m]),
+    ).length;
+    const status =
+      eatenCount === 3
+        ? "Full (3/3)"
+        : eatenCount === 0
+          ? "None (0/3)"
+          : `Partial (${eatenCount}/3)`;
+    return { ...r, status };
+  });
   if (f.search)
     rows = rows.filter(
       (r) =>
@@ -363,190 +367,195 @@ async function fetchAttendance(f) {
         r.room.toLowerCase().includes(f.search),
     );
   rows.sort((a, b) => a.name.localeCompare(b.name));
-  return rows;
+
+  const totals = { breakfast: 0, lunch: 0, dinner: 0 };
+  rows.forEach((r) =>
+    MEAL_TYPES.forEach((m) => {
+      if (["yes", "double"].includes(r[m])) totals[m]++;
+    }),
+  );
+
+  return {
+    rows,
+    summary: [
+      {
+        label: "Total Breakfast Count",
+        value: totals.breakfast,
+        icon: "fa-mug-hot",
+      },
+      { label: "Total Lunch Count", value: totals.lunch, icon: "fa-bowl-food" },
+      {
+        label: "Total Dinner Count",
+        value: totals.dinner,
+        icon: "fa-utensils",
+      },
+    ],
+  };
 }
 
+// ---- 3. Fine Report ------------------------------------------------------------
 function fineColumns() {
   return [
-    { key: "date", label: "Date", render: (r) => formatDate(r.date) },
-    { key: "name", label: "Student", render: (r) => r.students?.name || "—" },
-    {
-      key: "room",
-      label: "Room",
-      render: (r) => r.students?.room_number || "—",
-    },
-    {
-      key: "reason",
-      label: "Reason",
-      render: (r) =>
-        r.reason === "mismatch"
-          ? "Booking/confirmation mismatch"
-          : r.reason === "no_confirmation"
-            ? "No confirmation submitted"
-            : "Manual",
-    },
-    { key: "amount", label: "Amount", render: (r) => currency(r.amount) },
+    { key: "name", label: "Student Name" },
+    { key: "room", label: "Room No" },
+    { key: "dates", label: "Fine Date(s)" },
+    { key: "amount", label: "Fine Amount", render: (r) => currency(r.amount) },
   ];
 }
-async function fetchFines(f) {
+async function fetchFineReport(f) {
   let q = supabase
     .from("fines")
     .select("*, students(name, room_number)")
     .order("date", { ascending: false });
-  q = applyDateFilters(q, f);
+  if (f.month) {
+    const [y, m] = f.month.split("-");
+    q = q
+      .gte("date", `${y}-${m}-01`)
+      .lte(
+        "date",
+        new Date(Number(y), Number(m), 0).toISOString().slice(0, 10),
+      );
+  }
+  if (f.from) q = q.gte("date", f.from);
+  if (f.to) q = q.lte("date", f.to);
   const { data } = await q;
-  let rows = data || [];
+  let fines = data || [];
   if (f.search)
-    rows = rows.filter((r) =>
+    fines = fines.filter((r) =>
       r.students?.name.toLowerCase().includes(f.search),
     );
-  return rows;
+
+  const byStudent = {};
+  fines.forEach((r) => {
+    const key = r.student_id;
+    byStudent[key] = byStudent[key] || {
+      name: r.students?.name || "—",
+      room: r.students?.room_number || "—",
+      dates: [],
+      amount: 0,
+    };
+    byStudent[key].dates.push(r.date);
+    byStudent[key].amount += Number(r.amount);
+  });
+
+  const rows = Object.values(byStudent)
+    .map((r) => ({
+      ...r,
+      dates: r.dates
+        .sort()
+        .map((d) => formatDate(d))
+        .join(", "),
+    }))
+    .sort((a, b) => b.amount - a.amount);
+
+  const totalFine = rows.reduce((s, r) => s + r.amount, 0);
+
+  return {
+    rows,
+    summary: [
+      {
+        label: "Total Fine Amount",
+        value: currency(totalFine),
+        icon: "fa-coins",
+      },
+    ],
+  };
 }
 
-function mealColumns() {
+// ---- 4. Tomorrow Booking Report -------------------------------------------------
+function tomorrowBookingColumns() {
   return [
-    { key: "date", label: "Date", render: (r) => formatDate(r.date) },
-    { key: "name", label: "Student", render: (r) => r.students?.name || "—" },
+    { key: "name", label: "Student Name" },
+    { key: "room", label: "Room No" },
     {
-      key: "room",
-      label: "Room",
-      render: (r) => r.students?.room_number || "—",
-    },
-    {
-      key: "booking_status",
-      label: "Booked",
-      render: (r) => (r.booking_status ? STATUS_LABELS[r.booking_status] : "—"),
-    },
-    {
-      key: "confirmed_status",
-      label: "Confirmed",
+      key: "breakfast",
+      label: "Breakfast",
       render: (r) =>
-        r.confirmed_status ? STATUS_LABELS[r.confirmed_status] : "—",
+        r.breakfast
+          ? `<span class="badge badge-${r.breakfast}">${STATUS_LABELS[r.breakfast]}</span>`
+          : "—",
     },
     {
-      key: "fine_amount",
-      label: "Day's Fine",
-      render: (r) => currency(r.fine_amount),
-    },
-  ];
-}
-async function fetchMealReport(f, mealType) {
-  let q = supabase
-    .from("bookings")
-    .select("*, students(name, room_number)")
-    .eq("meal_type", mealType)
-    .order("date", { ascending: false });
-  q = applyDateFilters(q, f);
-  const { data } = await q;
-  let rows = data || [];
-  if (f.search)
-    rows = rows.filter((r) =>
-      r.students?.name.toLowerCase().includes(f.search),
-    );
-  return rows;
-}
-
-function bookingColumns() {
-  return [
-    { key: "date", label: "Date", render: (r) => formatDate(r.date) },
-    { key: "name", label: "Student", render: (r) => r.students?.name || "—" },
-    {
-      key: "meal_type",
-      label: "Meal",
-      render: (r) => MEAL_LABELS[r.meal_type],
-    },
-    {
-      key: "booking_status",
-      label: "Booked",
-      render: (r) => (r.booking_status ? STATUS_LABELS[r.booking_status] : "—"),
-    },
-  ];
-}
-async function fetchBookingReport(f) {
-  let q = supabase
-    .from("bookings")
-    .select("*, students(name, room_number)")
-    .not("booking_status", "is", null)
-    .order("date", { ascending: false });
-  q = applyDateFilters(q, f);
-  const { data } = await q;
-  let rows = data || [];
-  if (f.search)
-    rows = rows.filter((r) =>
-      r.students?.name.toLowerCase().includes(f.search),
-    );
-  return rows;
-}
-
-function confirmationColumns() {
-  return [
-    { key: "date", label: "Date", render: (r) => formatDate(r.date) },
-    { key: "name", label: "Student", render: (r) => r.students?.name || "—" },
-    {
-      key: "meal_type",
-      label: "Meal",
-      render: (r) => MEAL_LABELS[r.meal_type],
-    },
-    {
-      key: "confirmed_status",
-      label: "Confirmed",
+      key: "lunch",
+      label: "Lunch",
       render: (r) =>
-        r.confirmed_status ? STATUS_LABELS[r.confirmed_status] : "—",
+        r.lunch
+          ? `<span class="badge badge-${r.lunch}">${STATUS_LABELS[r.lunch]}</span>`
+          : "—",
+    },
+    {
+      key: "dinner",
+      label: "Dinner",
+      render: (r) =>
+        r.dinner
+          ? `<span class="badge badge-${r.dinner}">${STATUS_LABELS[r.dinner]}</span>`
+          : "—",
     },
   ];
 }
-async function fetchConfirmationReport(f) {
-  let q = supabase
+async function fetchTomorrowBookingReport(f) {
+  const date = tomorrowISO();
+  const { data, error } = await supabase
     .from("bookings")
-    .select("*, students(name, room_number)")
-    .not("confirmed_status", "is", null)
-    .order("date", { ascending: false });
-  q = applyDateFilters(q, f);
-  const { data } = await q;
-  let rows = data || [];
+    .select(
+      "student_id, meal_type, booking_status, students(name, room_number)",
+    )
+    .eq("date", date);
+  if (error || !data) return { rows: [], summary: [] };
+
+  const byStudent = {};
+  data.forEach((r) => {
+    byStudent[r.student_id] = byStudent[r.student_id] || {
+      name: r.students?.name || "—",
+      room: r.students?.room_number || "—",
+      breakfast: null,
+      lunch: null,
+      dinner: null,
+    };
+    byStudent[r.student_id][r.meal_type] = r.booking_status;
+  });
+
+  let rows = Object.values(byStudent).filter((r) =>
+    MEAL_TYPES.some((m) => ["yes", "double"].includes(r[m])),
+  );
   if (f.search)
-    rows = rows.filter((r) =>
-      r.students?.name.toLowerCase().includes(f.search),
+    rows = rows.filter(
+      (r) =>
+        r.name.toLowerCase().includes(f.search) ||
+        r.room.toLowerCase().includes(f.search),
     );
-  return rows;
+  rows.sort((a, b) => a.name.localeCompare(b.name));
+
+  const totals = { breakfast: 0, lunch: 0, dinner: 0 };
+  rows.forEach((r) =>
+    MEAL_TYPES.forEach((m) => {
+      if (["yes", "double"].includes(r[m])) totals[m]++;
+    }),
+  );
+
+  return {
+    rows,
+    summary: [
+      {
+        label: "Total Breakfast Bookings",
+        value: totals.breakfast,
+        icon: "fa-mug-hot",
+      },
+      {
+        label: "Total Lunch Bookings",
+        value: totals.lunch,
+        icon: "fa-bowl-food",
+      },
+      {
+        label: "Total Dinner Bookings",
+        value: totals.dinner,
+        icon: "fa-utensils",
+      },
+    ],
+  };
 }
 
-function paymentColumns() {
-  return [
-    {
-      key: "month_year",
-      label: "Month",
-      render: (r) => formatDate(r.month_year, { day: undefined }),
-    },
-    { key: "name", label: "Student", render: (r) => r.students?.name || "—" },
-    {
-      key: "mess_amount",
-      label: "Mess Amount",
-      render: (r) => currency(r.mess_amount),
-    },
-    {
-      key: "paid_amount",
-      label: "Paid",
-      render: (r) => currency(r.paid_amount),
-    },
-    { key: "status", label: "Status", render: (r) => r.status },
-  ];
-}
-async function fetchPaymentReport(f) {
-  let q = supabase
-    .from("payments")
-    .select("*, students(name, room_number)")
-    .order("month_year", { ascending: false });
-  if (f.month) q = q.eq("month_year", `${f.month}-01`);
-  const { data } = await q;
-  let rows = data || [];
-  if (f.search)
-    rows = rows.filter((r) =>
-      r.students?.name.toLowerCase().includes(f.search),
-    );
-  return rows;
-}
-
+// ---- 5 & 6. Expense / Grocery Report --------------------------------------------
 function expenseColumns() {
   return [
     { key: "date", label: "Date", render: (r) => formatDate(r.date) },
@@ -565,116 +574,18 @@ async function fetchExpenseReport(f, categoryFilter) {
     .select("*")
     .order("date", { ascending: false });
   if (categoryFilter) q = q.eq("category", categoryFilter);
-  q = applyDateFilters(q, f);
-  const { data } = await q;
-  return data || [];
-}
-
-function revenueColumns() {
-  return [
-    { key: "month", label: "Month" },
-    {
-      key: "payments",
-      label: "Payments Collected",
-      render: (r) => currency(r.payments),
-    },
-    {
-      key: "fines",
-      label: "Fine Collection",
-      render: (r) => currency(r.fines),
-    },
-    { key: "total", label: "Total Revenue", render: (r) => currency(r.total) },
-  ];
-}
-async function fetchRevenueReport() {
-  const months = last6Months();
-  const rows = [];
-  for (const m of months) {
-    const { data: pay } = await supabase
-      .from("payments")
-      .select("paid_amount")
-      .eq("month_year", `${m}-01`);
-    const { data: fines } = await supabase
-      .from("fines")
-      .select("amount")
-      .gte("date", `${m}-01`)
-      .lte("date", monthEnd(m));
-    const payments = (pay || []).reduce((s, p) => s + Number(p.paid_amount), 0);
-    const fineTotal = (fines || []).reduce((s, x) => s + Number(x.amount), 0);
-    rows.push({
-      month: m,
-      payments,
-      fines: fineTotal,
-      total: payments + fineTotal,
-    });
-  }
-  return rows;
-}
-
-function profitLossColumns() {
-  return [
-    { key: "month", label: "Month" },
-    { key: "revenue", label: "Revenue", render: (r) => currency(r.revenue) },
-    { key: "expenses", label: "Expenses", render: (r) => currency(r.expenses) },
-    {
-      key: "profit",
-      label: "Profit / Loss",
-      render: (r) => currency(r.profit),
-    },
-  ];
-}
-async function fetchProfitLossReport() {
-  const months = last6Months();
-  const rows = [];
-  for (const m of months) {
-    const { data: pay } = await supabase
-      .from("payments")
-      .select("paid_amount")
-      .eq("month_year", `${m}-01`);
-    const { data: fines } = await supabase
-      .from("fines")
-      .select("amount")
-      .gte("date", `${m}-01`)
-      .lte("date", monthEnd(m));
-    const { data: exp } = await supabase
-      .from("expenses")
-      .select("amount")
-      .gte("date", `${m}-01`)
-      .lte("date", monthEnd(m));
-    const revenue =
-      (pay || []).reduce((s, p) => s + Number(p.paid_amount), 0) +
-      (fines || []).reduce((s, x) => s + Number(x.amount), 0);
-    const expenses = (exp || []).reduce((s, e) => s + Number(e.amount), 0);
-    rows.push({ month: m, revenue, expenses, profit: revenue - expenses });
-  }
-  return rows;
-}
-
-// ---- shared helpers -----------------------------------------------------------
-function applyDateFilters(query, f) {
   if (f.month) {
     const [y, m] = f.month.split("-");
-    query = query
+    q = q
       .gte("date", `${y}-${m}-01`)
       .lte(
         "date",
         new Date(Number(y), Number(m), 0).toISOString().slice(0, 10),
       );
   }
-  if (f.from) query = query.gte("date", f.from);
-  if (f.to) query = query.lte("date", f.to);
-  return query;
-}
-function last6Months() {
-  const out = [];
-  const now = new Date();
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
-  }
-  return out;
-}
-function monthEnd(ym) {
-  const [y, m] = ym.split("-");
-  return new Date(Number(y), Number(m), 0).toISOString().slice(0, 10);
+  if (f.from) q = q.gte("date", f.from);
+  if (f.to) q = q.lte("date", f.to);
+  const { data } = await q;
+  const rows = data || [];
+  return { rows, summary: [] };
 }
