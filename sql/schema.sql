@@ -264,6 +264,7 @@ declare
   v_open time; v_close time; v_now time := current_time;
   v_within_window boolean;
   v_no_food_enabled boolean;
+  v_selected_status text;
 begin
   -- recompute_daily_fine() runs as the calling student (it's SECURITY
   -- INVOKER, and auth.uid() reflects the request's JWT regardless of
@@ -353,7 +354,11 @@ begin
   -- booking_status into confirmed_status automatically for those meals
   -- (see supabase/functions/lock-confirmations), so this never falsely
   -- triggers the "no confirmation submitted" fine.
-  if new.confirmed_status is distinct from old.confirmed_status then
+  if new.confirmed_status is distinct from old.confirmed_status
+     or (
+       coalesce(new.confirmation_locked, false) is true
+       and coalesce(old.confirmation_locked, false) is false
+     ) then
     if new.date <> current_date then
       raise exception 'Confirmation is only accepted for today''s date';
     end if;
@@ -367,10 +372,8 @@ begin
     if not coalesce(v_no_food_enabled, false) then
       raise exception 'This meal is locked to your booking — No Food is not enabled for %, so it is not editable', new.meal_type;
     end if;
-    if new.booking_status is null then
-      raise exception 'This meal has no booking to confirm';
-    end if;
-    if new.confirmed_status is null or new.confirmed_status not in (new.booking_status, 'no_food') then
+    v_selected_status := coalesce(old.confirmed_status, new.booking_status, old.booking_status, 'no');
+    if new.confirmed_status is null or new.confirmed_status not in (v_selected_status, 'no_food') then
       raise exception 'Only your selected booking option or No Food can be submitted for this meal';
     end if;
     new.confirmation_locked := true;
@@ -408,6 +411,8 @@ begin
          else current_time::time >= v_open or current_time::time <= v_close end;
 end;
 $$;
+
+grant execute on function get_meal_window_status() to anon, authenticated;
 
 drop trigger if exists trg_bookings_guard on bookings;
 create trigger trg_bookings_guard

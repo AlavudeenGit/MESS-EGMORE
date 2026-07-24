@@ -10,6 +10,7 @@ declare
   v_open time; v_close time; v_now time := current_time;
   v_within_window boolean;
   v_no_food_enabled boolean;
+  v_selected_status text;
 begin
   if coalesce(current_setting('app.bypass_booking_guard', true), 'false') = 'true' then
     return new;
@@ -62,7 +63,11 @@ begin
     new.booked_at := now();
   end if;
 
-  if new.confirmed_status is distinct from old.confirmed_status then
+  if new.confirmed_status is distinct from old.confirmed_status
+     or (
+       coalesce(new.confirmation_locked, false) is true
+       and coalesce(old.confirmation_locked, false) is false
+     ) then
     if new.date <> current_date then
       raise exception 'Confirmation is only accepted for today''s date';
     end if;
@@ -76,10 +81,8 @@ begin
     if not coalesce(v_no_food_enabled, false) then
       raise exception 'This meal is locked to your booking - No Food is not enabled for %, so it is not editable', new.meal_type;
     end if;
-    if new.booking_status is null then
-      raise exception 'This meal has no booking to confirm';
-    end if;
-    if new.confirmed_status is null or new.confirmed_status not in (new.booking_status, 'no_food') then
+    v_selected_status := coalesce(old.confirmed_status, new.booking_status, old.booking_status, 'no');
+    if new.confirmed_status is null or new.confirmed_status not in (v_selected_status, 'no_food') then
       raise exception 'Only your selected booking option or No Food can be submitted for this meal';
     end if;
     new.confirmation_locked := true;
@@ -94,3 +97,24 @@ drop trigger if exists trg_bookings_guard on bookings;
 create trigger trg_bookings_guard
 before insert or update on bookings
 for each row execute function enforce_booking_write();
+
+create or replace function get_meal_window_status()
+returns table(server_date date, server_time time, window_open time, window_close time, is_open boolean)
+language plpgsql stable as $$
+declare
+  v_open time; v_close time;
+begin
+  select value::time into v_open from settings where key = 'booking_open_time';
+  select value::time into v_close from settings where key = 'booking_close_time';
+  return query select
+    current_date,
+    current_time::time,
+    v_open,
+    v_close,
+    case when v_open <= v_close then current_time::time between v_open and v_close
+         else current_time::time >= v_open or current_time::time <= v_close end;
+end;
+$$;
+
+grant execute on function get_meal_window_status() to anon, authenticated;
+notify pgrst, 'reload schema';
