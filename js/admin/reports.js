@@ -65,7 +65,7 @@ const REPORT_HINTS = {
   student:
     "All registered students, with Breakfast/Lunch/Dinner totals for the current month.",
   attendance:
-    "Only students who submitted a confirmation on the selected date.",
+    "Today's meal bookings for the selected date — students with at least one meal booked Yes/Double.",
   fine: "Every fine charged, grouped per student. Filter by month or a date range.",
   tomorrow_booking:
     "Tomorrow's bookings — students with at least one meal booked Yes/Double.",
@@ -330,10 +330,9 @@ async function fetchAttendanceReport(f) {
   const { data, error } = await supabase
     .from("bookings")
     .select(
-      "student_id, meal_type, confirmed_status, students(name, room_number)",
+      "student_id, meal_type, booking_status, students(name, room_number)",
     )
-    .eq("date", date)
-    .not("confirmed_status", "is", null);
+    .eq("date", date);
   if (error || !data) return { rows: [], summary: [] };
 
   const byStudent = {};
@@ -345,21 +344,23 @@ async function fetchAttendanceReport(f) {
       lunch: null,
       dinner: null,
     };
-    byStudent[r.student_id][r.meal_type] = r.confirmed_status;
+    byStudent[r.student_id][r.meal_type] = r.booking_status;
   });
 
-  let rows = Object.values(byStudent).map((r) => {
-    const eatenCount = MEAL_TYPES.filter((m) =>
-      ["yes", "double"].includes(r[m]),
-    ).length;
-    const status =
-      eatenCount === 3
-        ? "Full (3/3)"
-        : eatenCount === 0
-          ? "None (0/3)"
-          : `Partial (${eatenCount}/3)`;
-    return { ...r, status };
-  });
+  let rows = Object.values(byStudent)
+    .filter((r) => MEAL_TYPES.some((m) => ["yes", "double"].includes(r[m])))
+    .map((r) => {
+      const bookedCount = MEAL_TYPES.filter((m) =>
+        ["yes", "double"].includes(r[m]),
+      ).length;
+      const status =
+        bookedCount === 3
+          ? "Full (3/3)"
+          : bookedCount === 0
+            ? "None (0/3)"
+            : `Partial (${bookedCount}/3)`;
+      return { ...r, status };
+    });
   if (f.search)
     rows = rows.filter(
       (r) =>
