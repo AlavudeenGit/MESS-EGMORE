@@ -12,12 +12,13 @@
 // sweep (see supabase/functions/lock-confirmations), so the fine
 // calculation always sees a real value instead of "never confirmed."
 //
-// For meals that ARE editable: tapping an option only updates local
-// selection (highlights it) — no API call yet. A single Submit button sends
-// everything changed in one batch call. Both selecting and submitting are
-// gated to the shared booking_open_time–booking_close_time window, checked
-// against the DATABASE's clock via get_meal_window_status() — not the
-// device's — so changing a phone's date/time can't unlock anything.
+// For meals that ARE editable: only the current meal value and No Food are
+// offered. Tapping an option only updates local selection (highlights it) —
+// no API call yet. A single Submit button sends everything changed in one
+// batch call. Both selecting and submitting are gated to the shared
+// booking_open_time–booking_close_time window, checked against the DATABASE's
+// clock via get_meal_window_status() — not the device's — so changing a
+// phone's date/time can't unlock anything.
 // ============================================================================
 import { supabase, MEAL_TYPES, MEAL_LABELS, STATUS_LABELS } from "../config.js";
 import { todayISO, getServerWindowStatus, getSettings } from "../utils.js";
@@ -114,7 +115,11 @@ function mealCardHTML(meal, row, selectedValue, windowOpen, settings) {
   const locked = row?.confirmation_locked || row?.cancelled_by_admin;
   const bookedStatus = row?.booking_status;
   const noFoodEnabled = settings[`no_food_enabled_${meal}`] === "true";
-  const editable = !locked && windowOpen && noFoodEnabled;
+  const editable =
+    !locked &&
+    windowOpen &&
+    noFoodEnabled &&
+    Boolean(selectedValue || bookedStatus);
 
   if (!editable) {
     // frozen to the booking — no option group, nothing to tap
@@ -148,14 +153,14 @@ function mealCardHTML(meal, row, selectedValue, windowOpen, settings) {
     `;
   }
 
-  const options = ["yes", "no", "no_food", "double"];
+  const options = getEditableOptions(row, selectedValue);
   return `
     <div class="card meal-card" data-meal="${meal}">
       <div class="meal-card__head">
         <span class="meal-name">${MEAL_LABELS[meal]}</span>
         ${bookedStatus ? `<span class="badge badge-${bookedStatus}">Booked: ${STATUS_LABELS[bookedStatus]}</span>` : '<span class="badge badge-locked">Not booked</span>'}
       </div>
-      <div class="option-group option-group--4">
+      <div class="option-group">
         ${options
           .map(
             (opt) => `
@@ -164,9 +169,15 @@ function mealCardHTML(meal, row, selectedValue, windowOpen, settings) {
           )
           .join("")}
       </div>
-      <p class="text-soft" style="font-size:12px;margin:8px 0 0;"><i class="fa-solid fa-circle-info"></i> No Food is available for this meal — you can change it before submitting.</p>
+      <p class="text-soft" style="font-size:12px;margin:8px 0 0;"><i class="fa-solid fa-circle-info"></i> No Food is available for this meal — only your selected option and No Food can be submitted.</p>
     </div>
   `;
+}
+
+function getEditableOptions(row, selectedValue) {
+  return [...new Set([selectedValue || row?.booking_status, "no_food"])].filter(
+    Boolean,
+  );
 }
 
 function wireMealCardSelection(
@@ -205,7 +216,11 @@ async function submitConfirmations(
     const row = byMeal[m];
     if (!isEditable({ ...row, meal_type: m }, settings, true)) return false;
     const current = row?.confirmed_status || row?.booking_status || null;
-    return selection[m] && selection[m] !== current;
+    return (
+      selection[m] &&
+      selection[m] !== current &&
+      getEditableOptions(row, current).includes(selection[m])
+    );
   });
 
   if (!changed.length) {

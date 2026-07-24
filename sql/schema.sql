@@ -367,6 +367,12 @@ begin
     if not coalesce(v_no_food_enabled, false) then
       raise exception 'This meal is locked to your booking — No Food is not enabled for %, so it is not editable', new.meal_type;
     end if;
+    if new.booking_status is null then
+      raise exception 'This meal has no booking to confirm';
+    end if;
+    if new.confirmed_status is null or new.confirmed_status not in (new.booking_status, 'no_food') then
+      raise exception 'Only your selected booking option or No Food can be submitted for this meal';
+    end if;
     new.confirmation_locked := true;
     new.confirmed_at := now();
   end if;
