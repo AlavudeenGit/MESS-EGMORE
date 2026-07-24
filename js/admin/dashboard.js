@@ -234,9 +234,14 @@ function activityRow(icon, text, when) {
 function countByMeal(rows, field) {
   const out = { breakfast: 0, lunch: 0, dinner: 0 };
   (rows || []).forEach((r) => {
-    if (r[field] && r[field] !== "no") out[r.meal_type]++;
+    out[r.meal_type] += mealCountValue(r[field]);
   });
   return out;
+}
+function mealCountValue(status) {
+  if (status === "double") return 2;
+  if (status && status !== "no") return 1;
+  return 0;
 }
 function sumAmount(rows) {
   return (rows || []).reduce((s, r) => s + Number(r.amount || 0), 0);

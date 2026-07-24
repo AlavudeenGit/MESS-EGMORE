@@ -221,6 +221,12 @@ function flattenForExport(columns, row) {
   return out;
 }
 
+function mealCountValue(status) {
+  if (status === "double") return 2;
+  if (status === "yes") return 1;
+  return 0;
+}
+
 // ---- 1. Students Report ------------------------------------------------------
 function studentColumns() {
   return [
@@ -278,7 +284,9 @@ async function fetchStudentsReport(f) {
       lunch: 0,
       dinner: 0,
     };
-    countsByStudent[r.student_id][r.meal_type]++;
+    countsByStudent[r.student_id][r.meal_type] += mealCountValue(
+      r.confirmed_status,
+    );
   });
 
   rows = rows
@@ -372,7 +380,7 @@ async function fetchAttendanceReport(f) {
   const totals = { breakfast: 0, lunch: 0, dinner: 0 };
   rows.forEach((r) =>
     MEAL_TYPES.forEach((m) => {
-      if (["yes", "double"].includes(r[m])) totals[m]++;
+      totals[m] += mealCountValue(r[m]);
     }),
   );
 
@@ -530,7 +538,7 @@ async function fetchTomorrowBookingReport(f) {
   const totals = { breakfast: 0, lunch: 0, dinner: 0 };
   rows.forEach((r) =>
     MEAL_TYPES.forEach((m) => {
-      if (["yes", "double"].includes(r[m])) totals[m]++;
+      totals[m] += mealCountValue(r[m]);
     }),
   );
 

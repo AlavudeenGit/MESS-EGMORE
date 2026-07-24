@@ -35,15 +35,7 @@ export async function renderMeals(root) {
   root.innerHTML = `
     <div id="mealsSummary" class="card-grid"></div>
 
-    <div class="card">
-      <h3>Bulk Cancel a Meal</h3>
-      <p class="text-soft" style="font-size:13px;">Cancelling sets every student's booking for that meal to "No" and locks it.</p>
-      <div class="filter-bar">
-        <select id="cancelDay"><option value="${today}">Today</option><option value="${tomorrow}">Tomorrow</option></select>
-        <select id="cancelMeal">${MEAL_TYPES.map((m) => `<option value="${m}">${MEAL_LABELS[m]}</option>`).join("")}</select>
-        <button class="btn btn-danger btn-sm" id="cancelMealBtn"><i class="fa-solid fa-ban"></i> Cancel Meal</button>
-      </div>
-    </div>
+
 
     <div class="card">
       <h3>Today's Meal Marking <span class="badge badge-locked">${formatDate(today)}</span></h3>
@@ -61,6 +53,16 @@ export async function renderMeals(root) {
         <input type="text" id="filterNameTomorrow" placeholder="Search name or room…">
       </div>
       <div id="tomorrowTable"><div class="skeleton" style="height:200px;border-radius:16px;"></div></div>
+    </div>
+    
+        <div class="card">
+      <h3>Bulk Cancel a Meal</h3>
+      <p class="text-soft" style="font-size:13px;">Cancelling sets every student's booking for that meal to "No" and locks it.</p>
+      <div class="filter-bar">
+        <select id="cancelDay"><option value="${today}">Today</option><option value="${tomorrow}">Tomorrow</option></select>
+        <select id="cancelMeal">${MEAL_TYPES.map((m) => `<option value="${m}">${MEAL_LABELS[m]}</option>`).join("")}</select>
+        <button class="btn btn-danger btn-sm" id="cancelMealBtn"><i class="fa-solid fa-ban"></i> Cancel Meal</button>
+      </div>
     </div>
   `;
 
@@ -95,9 +97,15 @@ export async function renderMeals(root) {
   function countByMeal(rows) {
     const out = { breakfast: 0, lunch: 0, dinner: 0 };
     (rows || []).forEach((r) => {
-      if (["yes", "double"].includes(r.booking_status)) out[r.meal_type]++;
+      out[r.meal_type] += bookingCountValue(r.booking_status);
     });
     return out;
+  }
+
+  function bookingCountValue(status) {
+    if (status === "double") return 2;
+    if (status === "yes") return 1;
+    return 0;
   }
 
   async function loadTodayTable() {
