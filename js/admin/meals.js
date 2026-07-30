@@ -500,14 +500,28 @@ async function openAddEntryModal(onSaved) {
       .eq("room_number", room);
     const ids = (roomStudents || []).map((s) => s.id);
 
+    // "already marked" means the same thing it means everywhere else in
+    // this app (Meal Entries, both Attendance reports): at least one meal
+    // is Yes or Double. A student whose rows are all "No" (or "No Food")
+    // hasn't really been given a meaningful entry — that's usually just
+    // the nightly lock-bookings sweep auto-filling an untouched meal to
+    // "No" — so they should still show up here as available, not be
+    // silently excluded.
     let alreadyMarked = new Set();
     if (ids.length) {
       const { data: existing } = await supabase
         .from("bookings")
-        .select("student_id")
+        .select("student_id, booking_status, confirmed_status")
         .eq("date", date)
         .in("student_id", ids);
-      alreadyMarked = new Set((existing || []).map((r) => r.student_id));
+      (existing || []).forEach((r) => {
+        if (
+          ["yes", "double"].includes(r.booking_status) ||
+          ["yes", "double"].includes(r.confirmed_status)
+        ) {
+          alreadyMarked.add(r.student_id);
+        }
+      });
     }
 
     const available = (roomStudents || [])
