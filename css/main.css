@@ -179,6 +179,14 @@ img {
     gap: var(--space-6);
     padding: var(--space-6) var(--space-6) var(--space-8);
   }
+  /* the 1fr grid track has an implicit min-width:auto, which — once a wide
+     table (e.g. Monthly Attendance's 90+ day columns) sits somewhere
+     inside it — refuses to shrink below the table's intrinsic content
+     width. Without this, the whole page overflows horizontally instead of
+     the table's own .table-wrap scrolling internally as intended. */
+  .app-shell__content {
+    min-width: 0;
+  }
 }
 
 .topbar {
@@ -298,6 +306,11 @@ img {
   padding: var(--space-5);
   box-shadow: var(--shadow-sm);
   transition: box-shadow var(--dur-fast) var(--ease);
+  /* .page is a column flex container; without this, a card containing a
+     wide table (many day columns) won't shrink below the table's
+     intrinsic content width, and the whole page overflows sideways
+     instead of just the table's own .table-wrap scrolling internally. */
+  min-width: 0;
 }
 .card--flat {
   box-shadow: none;
@@ -661,7 +674,10 @@ img {
   }
 }
 .table-wrap {
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* flat mode: forces a genuine table (thead visible, rows as table-rows,

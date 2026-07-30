@@ -1,9 +1,15 @@
 // ============================================================================
-// admin/reports.js — reduced to the 6 report types below. Every report
-// returns { rows, summary } from its fetch() — summary (an array of
-// { label, value } pairs, or empty) is rendered as cards above the table
-// AND passed into the export functions, so the downloaded Excel/PDF file
-// always shows the exact same figures as the screen, not just the raw rows.
+// admin/reports.js — 7 report types. Every report returns { rows, summary,
+// columns? } from its fetch() — summary (an array of { label, value } pairs,
+// or empty) is rendered as cards above the table AND passed into the export
+// functions, so the downloaded Excel/PDF file always shows the exact same
+// figures as the screen. `columns` is optional per-fetch (used by Monthly
+// Attendance, whose columns are dynamic per selected month) — falls back to
+// the report type's static columns() otherwise.
+//
+// Exports are PERIOD-aware, not download-date-aware: the title and filename
+// always reflect the selected reporting date/month/range (computed by
+// computePeriod() below), never the date the file happens to be downloaded.
 // ============================================================================
 import {
   supabase,
@@ -30,10 +36,16 @@ const REPORT_TYPES = {
     columns: studentColumns(),
   },
   attendance: {
-    label: "Daily Attendance Report",
+    label: "Today's Marking Report",
     filters: ["search", "date"],
     fetch: fetchAttendanceReport,
     columns: attendanceColumns(),
+  },
+  monthly_attendance: {
+    label: "Monthly Attendance Report",
+    filters: ["search", "month"],
+    flat: true,
+    fetch: fetchMonthlyAttendanceReport,
   },
   fine: {
     label: "Fine Report",
@@ -65,7 +77,9 @@ const REPORT_HINTS = {
   student:
     "All registered students, with Breakfast/Lunch/Dinner totals for the current month.",
   attendance:
-    "Today's meal bookings for the selected date — students with at least one meal booked Yes/Double.",
+    "Today's meal marking — students with at least one meal booked Yes/Double, same data as Meal Entries.",
+  monthly_attendance:
+    "Every day of the selected month, Breakfast/Lunch/Dinner status side by side, per student.",
   fine: "Every fine charged, grouped per student. Filter by month or a date range.",
   tomorrow_booking:
     "Tomorrow's bookings — students with at least one meal booked Yes/Double.",
@@ -90,6 +104,7 @@ export async function renderReports(root) {
         <input type="date" id="reportTo" title="To date">
       </div>
       <p class="text-soft" id="reportHint" style="font-size:12px;margin:8px 0 0;"></p>
+      <p class="text-soft" id="reportPeriod" style="font-size:12px;margin:4px 0 0;font-weight:700;"></p>
     </div>
     <div id="reportSummary" class="card-grid"></div>
     <div class="report-toolbar">
@@ -103,6 +118,7 @@ export async function renderReports(root) {
   let lastRows = [];
   let lastColumns = [];
   let lastSummary = [];
+  let lastPeriod = { label: "", slug: "" };
 
   function syncFilterVisibility() {
     const type = document.getElementById("reportType").value;
@@ -136,6 +152,12 @@ export async function renderReports(root) {
     ) {
       document.getElementById("reportDate").value = todayISO();
     }
+    if (
+      active.includes("month") &&
+      !document.getElementById("reportMonth").value
+    ) {
+      document.getElementById("reportMonth").value = currentMonthYYYYMM();
+    }
   }
 
   async function load() {
@@ -158,18 +180,22 @@ export async function renderReports(root) {
     document.getElementById("reportOutput").innerHTML =
       `<div class="skeleton" style="height:200px;border-radius:16px;"></div>`;
 
-    const { rows, summary } = await def.fetch(filters);
-    lastRows = rows;
-    lastColumns = def.columns;
-    lastSummary = summary || [];
+    const result = await def.fetch(filters);
+    lastRows = result.rows;
+    lastColumns = result.columns || def.columns;
+    lastSummary = result.summary || [];
+    lastPeriod = computePeriod(type, filters);
 
+    document.getElementById("reportPeriod").textContent = lastPeriod.label
+      ? `Showing: ${lastPeriod.label}`
+      : "";
     document.getElementById("reportSummary").innerHTML = lastSummary
       .map((s) => statCard({ label: s.label, value: s.value, icon: s.icon }))
       .join("");
     document.getElementById("reportOutput").innerHTML = renderTable(
-      def.columns,
-      rows,
-      { emptyMessage: "No data for this filter" },
+      lastColumns,
+      lastRows,
+      { emptyMessage: "No data for this filter", flat: !!def.flat },
     );
   }
 
@@ -181,6 +207,15 @@ export async function renderReports(root) {
   document.getElementById("reportTo").addEventListener("change", load);
 
   document.getElementById("exportExcel").addEventListener("click", () => {
+    const type = document.getElementById("reportType").value;
+    if (type === "monthly_attendance") {
+      exportMonthlyAttendanceExcel(
+        lastRows,
+        lastColumns,
+        `${type}-${lastPeriod.slug}`,
+      );
+      return;
+    }
     const summaryPairs = lastSummary.map((s) => ({
       label: s.label,
       value: s.value,
@@ -188,10 +223,11 @@ export async function renderReports(root) {
     exportToExcelWithSummary(
       summaryPairs,
       lastRows.map((r) => flattenForExport(lastColumns, r)),
-      `report-${document.getElementById("reportType").value}`,
+      `${type}-${lastPeriod.slug}`,
     );
   });
   document.getElementById("exportPdf").addEventListener("click", () => {
+    const type = document.getElementById("reportType").value;
     const summaryPairs = lastSummary.map((s) => ({
       label: s.label,
       value: s.value,
@@ -200,8 +236,8 @@ export async function renderReports(root) {
       summaryPairs,
       lastColumns.map((c) => ({ key: c.key, label: c.label })),
       lastRows.map((r) => flattenForExport(lastColumns, r)),
-      REPORT_TYPES[document.getElementById("reportType").value].label,
-      `report-${document.getElementById("reportType").value}`,
+      `${REPORT_TYPES[type].label} — ${lastPeriod.label}`,
+      `${type}-${lastPeriod.slug}`,
     );
   });
   document
@@ -216,15 +252,67 @@ function flattenForExport(columns, row) {
   const out = {};
   columns.forEach((c) => {
     const raw = c.render ? c.render(row) : row[c.key];
-    out[c.label] = typeof raw === "string" ? raw.replace(/<[^>]*>/g, "") : raw;
+    if (typeof raw === "string") {
+      // turn stacked <br> lines (e.g. Monthly Attendance's "BF: Yes<br>LN: No")
+      // into a readable single-line " | " separated value instead of
+      // silently concatenating everything together once tags are stripped
+      out[c.label] = raw
+        .replace(/<br\s*\/?>/gi, " | ")
+        .replace(/<[^>]*>/g, "")
+        .trim();
+    } else {
+      out[c.label] = raw;
+    }
   });
   return out;
 }
 
-function mealCountValue(status) {
-  if (status === "double") return 2;
-  if (status === "yes") return 1;
-  return 0;
+// ---- period helpers (drives export title + filename — always the
+// SELECTED reporting date/period, never "today" the file was downloaded) --
+function currentMonthYYYYMM() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+function monthYearLabel(yyyymm) {
+  const [y, m] = yyyymm.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-IN", {
+    month: "long",
+    year: "numeric",
+  });
+}
+function computePeriod(type, f) {
+  switch (type) {
+    case "student":
+      return {
+        label: `Current month (${monthYearLabel(currentMonthYYYYMM())})`,
+        slug: currentMonthYYYYMM(),
+      };
+    case "attendance": {
+      const d = f.date || todayISO();
+      return { label: formatDate(d), slug: d };
+    }
+    case "monthly_attendance": {
+      const m = f.month || currentMonthYYYYMM();
+      return { label: monthYearLabel(m), slug: m };
+    }
+    case "tomorrow_booking": {
+      const d = tomorrowISO();
+      return { label: formatDate(d), slug: d };
+    }
+    case "fine":
+    case "expense":
+    case "grocery": {
+      if (f.month) return { label: monthYearLabel(f.month), slug: f.month };
+      if (f.from || f.to)
+        return {
+          label: `${f.from ? formatDate(f.from) : "start"} to ${f.to ? formatDate(f.to) : "now"}`,
+          slug: `${f.from || "start"}_to_${f.to || "now"}`,
+        };
+      return { label: "All time", slug: "all-time" };
+    }
+    default:
+      return { label: "", slug: "export" };
+  }
 }
 
 // ---- 1. Students Report ------------------------------------------------------
@@ -284,9 +372,7 @@ async function fetchStudentsReport(f) {
       lunch: 0,
       dinner: 0,
     };
-    countsByStudent[r.student_id][r.meal_type] += mealCountValue(
-      r.confirmed_status,
-    );
+    countsByStudent[r.student_id][r.meal_type]++;
   });
 
   rows = rows
@@ -301,7 +387,12 @@ async function fetchStudentsReport(f) {
   return { rows, summary: [] };
 }
 
-// ---- 2. Daily Attendance Report -----------------------------------------------
+// ---- 2. Today's Marking Report (formerly "Daily Attendance Report") ------------
+// Uses booking_status — the SAME field Meal Entries' "Today's Meal Marking"
+// table reads — so the two can never disagree. (Previously this read
+// confirmed_status, which now stays null until the nightly lock-confirmations
+// sweep runs for any meal where No Food is disabled, causing exactly the
+// mismatch that was reported.)
 function attendanceColumns() {
   return [
     { key: "name", label: "Student Name" },
@@ -355,20 +446,19 @@ async function fetchAttendanceReport(f) {
     byStudent[r.student_id][r.meal_type] = r.booking_status;
   });
 
-  let rows = Object.values(byStudent)
-    .filter((r) => MEAL_TYPES.some((m) => ["yes", "double"].includes(r[m])))
-    .map((r) => {
-      const bookedCount = MEAL_TYPES.filter((m) =>
-        ["yes", "double"].includes(r[m]),
-      ).length;
-      const status =
-        bookedCount === 3
-          ? "Full (3/3)"
-          : bookedCount === 0
-            ? "None (0/3)"
-            : `Partial (${bookedCount}/3)`;
-      return { ...r, status };
-    });
+  // only students with at least one meal booked Yes/Double — matches
+  // Meal Entries exactly
+  let rows = Object.values(byStudent).filter((r) =>
+    MEAL_TYPES.some((m) => ["yes", "double"].includes(r[m])),
+  );
+  rows = rows.map((r) => {
+    const eatenCount = MEAL_TYPES.filter((m) =>
+      ["yes", "double"].includes(r[m]),
+    ).length;
+    const status =
+      eatenCount === 3 ? "Full (3/3)" : `Partial (${eatenCount}/3)`;
+    return { ...r, status };
+  });
   if (f.search)
     rows = rows.filter(
       (r) =>
@@ -380,7 +470,7 @@ async function fetchAttendanceReport(f) {
   const totals = { breakfast: 0, lunch: 0, dinner: 0 };
   rows.forEach((r) =>
     MEAL_TYPES.forEach((m) => {
-      totals[m] += mealCountValue(r[m]);
+      if (["yes", "double"].includes(r[m])) totals[m]++;
     }),
   );
 
@@ -402,7 +492,145 @@ async function fetchAttendanceReport(f) {
   };
 }
 
-// ---- 3. Fine Report ------------------------------------------------------------
+// ---- 3. Monthly Attendance Report ------------------------------------------------
+// One row per student, one column per day of the selected month. Each day's
+// cell stacks all three meals ("BF: Yes / LN: No / DN: No" on export,
+// stacked lines on screen). Uses confirmed_status where it's been set,
+// falling back to booking_status — for a past day this is normally the
+// same value anyway (the nightly sweep copies it), but this way a day
+// where a student genuinely changed their meal via No Food still shows
+// what actually happened, not just what was originally booked.
+function daysInMonth(yyyymm) {
+  const [y, m] = yyyymm.split("-").map(Number);
+  const lastDay = new Date(y, m, 0).getDate();
+  const days = [];
+  for (let d = 1; d <= lastDay; d++)
+    days.push(
+      `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`,
+    );
+  return days;
+}
+function formatDayColumnLabel(iso) {
+  const d = new Date(iso + "T00:00:00");
+  return `${d.toLocaleDateString("en-US", { month: "short" })}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function dayCellHTML(dayData) {
+  const val = (v) => (v ? STATUS_LABELS[v] || v : "—");
+  const b = val(dayData?.breakfast),
+    l = val(dayData?.lunch),
+    dnr = val(dayData?.dinner);
+  return `<div class="mono" style="font-size:10px;line-height:1.5;white-space:nowrap;">BF: ${b}<br>LN: ${l}<br>DN: ${dnr}</div>`;
+}
+
+/**
+ * Monthly Attendance's Excel export uses real grouped columns (a merged
+ * parent header cell per date spanning 3 real Breakfast/Lunch/Dinner
+ * columns underneath) instead of the generic single-column-per-row export
+ * every other report uses — genuinely useful in a spreadsheet (sort/filter
+ * per meal type) in a way the stacked-text version isn't. PDF/print still
+ * use the generic flattened version; only Excel gets this treatment.
+ */
+function exportMonthlyAttendanceExcel(rows, columns, filename) {
+  const dayColumns = columns.slice(2); // drop Student Name / Room Number
+  const val = (v) => (v ? STATUS_LABELS[v] || v : "—");
+
+  const header1 = ["Student Name", "Room Number"];
+  const header2 = ["", ""];
+  dayColumns.forEach((c) => {
+    header1.push(c.label, "", "");
+    header2.push("Breakfast", "Lunch", "Dinner");
+  });
+
+  const aoa = [header1, header2];
+  rows.forEach((r) => {
+    const rowArr = [r.name, r.room];
+    dayColumns.forEach((c) => {
+      const dd = r.dayData[c.key] || {};
+      rowArr.push(val(dd.breakfast), val(dd.lunch), val(dd.dinner));
+    });
+    aoa.push(rowArr);
+  });
+
+  const ws = window.XLSX.utils.aoa_to_sheet(aoa);
+  const merges = [
+    { s: { r: 0, c: 0 }, e: { r: 1, c: 0 } }, // Student Name spans both header rows
+    { s: { r: 0, c: 1 }, e: { r: 1, c: 1 } }, // Room Number spans both header rows
+  ];
+  dayColumns.forEach((c, i) => {
+    const startCol = 2 + i * 3;
+    merges.push({ s: { r: 0, c: startCol }, e: { r: 0, c: startCol + 2 } });
+  });
+  ws["!merges"] = merges;
+
+  const wb = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(wb, ws, "Monthly Attendance");
+  window.XLSX.writeFile(wb, `${filename}.xlsx`);
+}
+async function fetchMonthlyAttendanceReport(f) {
+  const month = f.month || currentMonthYYYYMM();
+  const days = daysInMonth(month);
+  const monthStart = days[0],
+    monthEnd = days[days.length - 1];
+
+  const { data: students } = await supabase
+    .from("students")
+    .select("id, name, room_number")
+    .neq("status", "pending");
+  let studentRows = students || [];
+  if (f.search)
+    studentRows = studentRows.filter(
+      (s) =>
+        s.name.toLowerCase().includes(f.search) ||
+        s.room_number.toLowerCase().includes(f.search),
+    );
+  studentRows.sort((a, b) => a.name.localeCompare(b.name));
+
+  const { data: bookingRows } = await supabase
+    .from("bookings")
+    .select("student_id, date, meal_type, booking_status, confirmed_status")
+    .gte("date", monthStart)
+    .lte("date", monthEnd);
+
+  const dataMap = {};
+  (bookingRows || []).forEach((r) => {
+    dataMap[r.student_id] = dataMap[r.student_id] || {};
+    dataMap[r.student_id][r.date] = dataMap[r.student_id][r.date] || {};
+    dataMap[r.student_id][r.date][r.meal_type] =
+      r.confirmed_status || r.booking_status || null;
+  });
+
+  // date-visibility filter: a day column only appears if AT LEAST ONE
+  // student had AT LEAST ONE meal marked Yes/Double that day. Computed
+  // across every student regardless of the current name search, so
+  // searching for one student doesn't hide days just because THEY didn't
+  // eat — a day with any activity anywhere stays visible.
+  const visibleDays = days.filter((day) =>
+    Object.values(dataMap).some((studentDays) => {
+      const dd = studentDays[day];
+      return dd && MEAL_TYPES.some((m) => ["yes", "double"].includes(dd[m]));
+    }),
+  );
+
+  const columns = [
+    { key: "name", label: "Student Name" },
+    { key: "room", label: "Room Number" },
+    ...visibleDays.map((iso) => ({
+      key: iso,
+      label: formatDayColumnLabel(iso),
+      render: (r) => dayCellHTML(r.dayData[iso]),
+    })),
+  ];
+
+  const rows = studentRows.map((s) => ({
+    name: s.name,
+    room: s.room_number,
+    dayData: dataMap[s.id] || {},
+  }));
+
+  return { rows, columns, summary: [] };
+}
+
+// ---- 4. Fine Report ------------------------------------------------------------
 function fineColumns() {
   return [
     { key: "name", label: "Student Name" },
@@ -471,7 +699,7 @@ async function fetchFineReport(f) {
   };
 }
 
-// ---- 4. Tomorrow Booking Report -------------------------------------------------
+// ---- 5. Tomorrow Booking Report -------------------------------------------------
 function tomorrowBookingColumns() {
   return [
     { key: "name", label: "Student Name" },
@@ -538,7 +766,7 @@ async function fetchTomorrowBookingReport(f) {
   const totals = { breakfast: 0, lunch: 0, dinner: 0 };
   rows.forEach((r) =>
     MEAL_TYPES.forEach((m) => {
-      totals[m] += mealCountValue(r[m]);
+      if (["yes", "double"].includes(r[m])) totals[m]++;
     }),
   );
 
@@ -564,7 +792,7 @@ async function fetchTomorrowBookingReport(f) {
   };
 }
 
-// ---- 5 & 6. Expense / Grocery Report --------------------------------------------
+// ---- 6 & 7. Expense / Grocery Report --------------------------------------------
 function expenseColumns() {
   return [
     { key: "date", label: "Date", render: (r) => formatDate(r.date) },
