@@ -38,7 +38,10 @@ export async function renderMeals(root) {
 
 
     <div class="card">
-      <h3>Today's Meal Marking <span class="badge badge-locked">${formatDate(today)}</span></h3>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+        <h3 style="margin:0;">Today's Meal Marking <span class="badge badge-locked">${formatDate(today)}</span></h3>
+        <button class="btn btn-primary btn-sm" id="addEntryBtn"><i class="fa-solid fa-plus"></i> Add Entry</button>
+      </div>
       <p class="text-soft" style="font-size:13px;">Overrides only apply to today. Only students with at least one meal booked Yes/Double are listed.</p>
       <div class="filter-bar">
         <input type="text" id="filterNameToday" placeholder="Search name or room…">
@@ -257,6 +260,14 @@ export async function renderMeals(root) {
     }, 250),
   );
 
+  document.getElementById("addEntryBtn").addEventListener("click", () => {
+    openAddEntryModal(() => {
+      loadSummary();
+      loadTodayTable();
+      loadTomorrowTable();
+    });
+  });
+
   document
     .getElementById("cancelMealBtn")
     .addEventListener("click", async () => {
@@ -371,4 +382,208 @@ function openOverrideModal(studentRow, date, onSaved) {
     closeModal();
     onSaved();
   };
+}
+
+/**
+ * "Add Entry" — backfills a student who has ZERO booking rows at all for
+ * the selected date (today or yesterday only — see enforce_booking_write()
+ * in sql/schema.sql, which only allows an admin to INSERT, never UPDATE, a
+ * row for yesterday's date). The Student dropdown only ever lists students
+ * with no existing entry for the chosen date, so this can't create a
+ * duplicate or silently overwrite something the student or admin already
+ * set.
+ *
+ * Meal Selection offers Yes/No/Double/No Food per meal. No Food can only
+ * ever live in confirmed_status (booking_status's CHECK constraint doesn't
+ * allow it), so selecting it writes booking_status='yes' + confirmed_status
+ * ='no_food' — the one combination the fine logic already treats as the
+ * deliberate no-fine exception. Every other choice writes the same value
+ * to both columns, so the entry is immediately consistent (no mismatch,
+ * no fine) exactly as if the student had booked and confirmed it themselves.
+ */
+async function openAddEntryModal(onSaved) {
+  const today = todayISO();
+  const yesterday = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  const body = openModal({
+    title: "Add Entry",
+    bodyHTML: `
+      <div class="field"><input type="date" id="aeDate" min="${yesterday}" max="${today}" value="${today}" placeholder=" "><label>Date</label></div>
+      <div class="field">
+        <select id="aeRoom" class="has-value"><option value="">Select a room…</option></select>
+        <label>Room Number</label>
+      </div>
+      <div class="field">
+        <select id="aeStudent" class="has-value" disabled><option value="">Select a room first…</option></select>
+        <label>Student Name</label>
+      </div>
+      <p id="aeStudentNote" class="text-soft" style="font-size:12px;"></p>
+
+      ${MEAL_TYPES.map(
+        (meal) => `
+        <div style="margin-bottom:16px;" data-ae-meal="${meal}">
+          <h4>${MEAL_LABELS[meal]}</h4>
+          <div class="option-group option-group--4">
+            ${["yes", "no", "double", "no_food"].map((o) => `<button class="option-btn" data-ae-group="${meal}" data-value="${o}">${STATUS_LABELS[o]}</button>`).join("")}
+          </div>
+        </div>
+      `,
+      ).join("")}
+
+      <button class="btn btn-primary btn-block" id="aeSave" disabled>Save Entry</button>
+    `,
+  });
+
+  const selection = { breakfast: null, lunch: null, dinner: null };
+  let selectedStudentId = null;
+
+  body.querySelectorAll(".option-btn").forEach((btn) => {
+    btn.onclick = () => {
+      const meal = btn.dataset.aeGroup;
+      body
+        .querySelectorAll(`[data-ae-group="${meal}"]`)
+        .forEach((b) => b.classList.remove("is-selected"));
+      btn.classList.add("is-selected");
+      selection[meal] = btn.dataset.value;
+      syncSaveEnabled();
+    };
+  });
+
+  function syncSaveEnabled() {
+    const allMealsChosen = MEAL_TYPES.every((m) => selection[m] !== null);
+    body.querySelector("#aeSave").disabled = !(
+      selectedStudentId && allMealsChosen
+    );
+  }
+
+  async function loadRooms() {
+    const { data } = await supabase
+      .from("students")
+      .select("room_number")
+      .eq("status", "active");
+    const rooms = [...new Set((data || []).map((r) => r.room_number))].sort(
+      (a, b) => a.localeCompare(b, undefined, { numeric: true }),
+    );
+    const select = body.querySelector("#aeRoom");
+    select.innerHTML =
+      '<option value="">Select a room…</option>' +
+      rooms.map((r) => `<option value="${r}">${r}</option>`).join("");
+  }
+
+  async function loadStudentsForRoom() {
+    const room = body.querySelector("#aeRoom").value;
+    const date = body.querySelector("#aeDate").value;
+    const studentSelect = body.querySelector("#aeStudent");
+    const note = body.querySelector("#aeStudentNote");
+    selectedStudentId = null;
+    syncSaveEnabled();
+
+    if (!room) {
+      studentSelect.disabled = true;
+      studentSelect.innerHTML =
+        '<option value="">Select a room first…</option>';
+      note.textContent = "";
+      return;
+    }
+
+    studentSelect.disabled = true;
+    studentSelect.innerHTML = '<option value="">Loading…</option>';
+
+    const { data: roomStudents } = await supabase
+      .from("students")
+      .select("id, name")
+      .eq("status", "active")
+      .eq("room_number", room);
+    const ids = (roomStudents || []).map((s) => s.id);
+
+    let alreadyMarked = new Set();
+    if (ids.length) {
+      const { data: existing } = await supabase
+        .from("bookings")
+        .select("student_id")
+        .eq("date", date)
+        .in("student_id", ids);
+      alreadyMarked = new Set((existing || []).map((r) => r.student_id));
+    }
+
+    const available = (roomStudents || [])
+      .filter((s) => !alreadyMarked.has(s.id))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    studentSelect.disabled = false;
+    if (!available.length) {
+      studentSelect.innerHTML =
+        '<option value="">No unmarked students in this room</option>';
+      note.textContent = `Every student in room ${room} already has an entry for this date.`;
+    } else {
+      studentSelect.innerHTML =
+        '<option value="">Select a student…</option>' +
+        available
+          .map((s) => `<option value="${s.id}">${s.name}</option>`)
+          .join("");
+      note.textContent = `Showing only students in room ${room} with no entry yet for this date.`;
+    }
+  }
+
+  body.querySelector("#aeRoom").addEventListener("change", loadStudentsForRoom);
+  body.querySelector("#aeDate").addEventListener("change", loadStudentsForRoom);
+  body.querySelector("#aeStudent").addEventListener("change", (e) => {
+    selectedStudentId = e.target.value || null;
+    syncSaveEnabled();
+  });
+
+  body.querySelector("#aeSave").addEventListener("click", async () => {
+    const saveBtn = body.querySelector("#aeSave");
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saving…";
+
+    const date = body.querySelector("#aeDate").value;
+    const payload = MEAL_TYPES.map((meal) => {
+      const choice = selection[meal];
+      const statuses =
+        choice === "no_food"
+          ? { booking_status: "yes", confirmed_status: "no_food" }
+          : { booking_status: choice, confirmed_status: choice };
+      return {
+        student_id: selectedStudentId,
+        date,
+        meal_type: meal,
+        ...statuses,
+        booking_locked: true,
+        booked_at: new Date().toISOString(),
+        confirmation_locked: true,
+        confirmed_at: new Date().toISOString(),
+      };
+    });
+
+    const { error } = await supabase
+      .from("bookings")
+      .upsert(payload, { onConflict: "student_id,date,meal_type" });
+    if (error) {
+      toast.error(error.message || "Could not save entry");
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save Entry";
+      return;
+    }
+
+    await supabase.rpc("recompute_daily_fine", {
+      p_student_id: selectedStudentId,
+      p_date: date,
+    });
+    if (date === today) {
+      toast.success("Entry added");
+    } else {
+      toast.success(
+        "Entry added for yesterday — check Reports → Today's Marking Report with that date to verify it",
+      );
+    }
+    closeModal();
+    onSaved();
+  });
+
+  await loadRooms();
 }
