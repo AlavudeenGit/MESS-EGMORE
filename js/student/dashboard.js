@@ -110,7 +110,11 @@ async function renderHome(root, ctx) {
         <button class="btn btn-primary btn-block" data-nav="markfood"><i class="fa-solid fa-utensils"></i> Confirm / Book Meals</button>
         <button class="btn btn-secondary btn-block" data-nav="menu"><i class="fa-solid fa-book-open"></i> View Weekly Menu</button>
       </div>
-    </div>
+      
+      </div>
+      <small style="font-size:10px; opacity:0.5;">
+  Developed By : Mohamed Alavudeen - 9360302955
+</small>
   `;
 
   root.querySelectorAll("[data-nav]").forEach((btn) => {
