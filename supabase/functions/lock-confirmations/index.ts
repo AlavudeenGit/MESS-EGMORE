@@ -10,19 +10,20 @@
 // the meal is pre-filled from yesterday's booking and the student can't
 // touch it at all, so THIS function is what actually finalizes it: for any
 // meal where No Food is off and confirmed_status is still null, it copies
-// booking_status into confirmed_status before locking, so the day's fine
-// calculation sees a real confirmed value instead of "never confirmed."
+// booking_status into confirmed_status before locking — this keeps
+// confirmed_status meaningful for reporting (Students Report, Monthly
+// Attendance Report) even though nothing was ever fine-relevant about it.
 //
 // For every active student x meal_type, for today's date:
 //   - auto-copy booking_status -> confirmed_status where No Food is disabled
 //     and nothing has been confirmed yet
 //   - lock any existing row (confirmation_locked = true)
-//   - if a student booked yes/double, No Food IS enabled for that meal, and
-//     they still never confirmed anything, leave confirmed_status null but
-//     lock it — recompute_daily_fine() reads exactly that combination to
-//     apply the ₹100 fine.
-// Then calls recompute_daily_fine(student_id, today) for every active
-// student so fines are finalized for the day.
+//   - create a locked placeholder for any student with no row at all today
+//
+// Fines are no longer calculated anywhere in this app — this function used
+// to also call recompute_daily_fine() for every active student; that call
+// has been removed.
+//
 // Not exposed to the browser — invoke via pg_cron (see supabase/CRON.md).
 // ============================================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -112,8 +113,7 @@ Deno.serve(async (req) => {
     }
 
     // students with no row at all today (didn't even book) — create a
-    // locked placeholder so the day is fully accounted for. No booking
-    // means no fine either way, recompute_daily_fine() handles that.
+    // locked placeholder so the day is fully accounted for
     const missing = [];
     for (const s of students || []) {
       for (const meal of MEAL_TYPES) {
@@ -137,20 +137,6 @@ Deno.serve(async (req) => {
       if (error) throw error;
     }
 
-    // finalize fines for every active student for today
-    let fined = 0;
-    for (const s of students || []) {
-      const { error } = await supabase.rpc("recompute_daily_fine", {
-        p_student_id: s.id,
-        p_date: today,
-      });
-      if (error) {
-        console.error("recompute_daily_fine failed for", s.id, error);
-        continue;
-      }
-      fined++;
-    }
-
     return new Response(
       JSON.stringify({
         ok: true,
@@ -158,7 +144,6 @@ Deno.serve(async (req) => {
         autoConfirmed,
         locked: existingIds.length,
         defaulted: missing.length,
-        recomputed: fined,
       }),
       { headers: { "Content-Type": "application/json" } },
     );

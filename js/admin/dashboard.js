@@ -129,7 +129,6 @@ async function renderHome(root) {
     { count: pendingRegs },
     { data: todayBookings },
     { data: todayConfirms },
-    { data: monthFines },
     { data: monthExpenses },
     { data: monthPayments },
     { data: recentStudents },
@@ -152,7 +151,6 @@ async function renderHome(root) {
       .from("bookings")
       .select("meal_type, confirmed_status")
       .eq("date", today),
-    supabase.from("fines").select("amount").gte("date", monthStart),
     supabase.from("expenses").select("amount").gte("date", monthStart),
     supabase
       .from("payments")
@@ -172,11 +170,11 @@ async function renderHome(root) {
 
   const bookingCounts = countByMeal(todayBookings, "booking_status");
   const confirmedCounts = countByMeal(todayConfirms, "confirmed_status");
-  const totalFineAmt = sumAmount(monthFines);
   const totalExpenseAmt = sumAmount(monthExpenses);
-  const totalRevenueAmt =
-    (monthPayments || []).reduce((s, p) => s + Number(p.paid_amount || 0), 0) +
-    totalFineAmt;
+  const totalRevenueAmt = (monthPayments || []).reduce(
+    (s, p) => s + Number(p.paid_amount || 0),
+    0,
+  );
   const profit = totalRevenueAmt - totalExpenseAmt;
 
   root.innerHTML = `
@@ -184,7 +182,6 @@ async function renderHome(root) {
       ${statCard({ label: "Total Students", value: totalStudents ?? 0, icon: "fa-users" })}
       ${statCard({ label: "Active", value: activeStudents ?? 0, icon: "fa-user-check" })}
       ${statCard({ label: "Pending Registrations", value: pendingRegs ?? 0, icon: "fa-user-clock" })}
-      ${statCard({ label: "Fine Collection (mo.)", value: currency(totalFineAmt), icon: "fa-coins" })}
       ${statCard({ label: "Monthly Revenue", value: currency(totalRevenueAmt), icon: "fa-arrow-trend-up" })}
       ${statCard({ label: "Monthly Expenses", value: currency(totalExpenseAmt), icon: "fa-arrow-trend-down" })}
       ${statCard({ label: "Profit / Loss", value: currency(profit), icon: "fa-scale-balanced" })}

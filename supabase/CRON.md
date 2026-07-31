@@ -1,13 +1,13 @@
 # Edge Functions — deploy + schedule
 
-Three functions live in `supabase/functions/`:
+Four functions live in `supabase/functions/`:
 
-| Function               | Trigger                                                  | Purpose                                                                                                   |
-| ---------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `lock-bookings`        | daily cron, ~5 min after `booking_close_time`            | locks tomorrow's bookings, defaults no-shows to "No"                                                      |
-| `lock-confirmations`   | daily cron, **same time** as `lock-bookings`             | locks today's confirmations, runs the fine sweep                                                          |
-| `admin-create-student` | called from the browser (Admin → Students → Add Student) | creates a login + student row using the service role key                                                  |
-| `admin-delete-student` | called from the browser (Admin → Students → Delete)      | permanently deletes a student's auth login, which cascades to their students/bookings/fines/payments rows |
+| Function               | Trigger                                                  | Purpose                                                                                                           |
+| ---------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `lock-bookings`        | daily cron, ~5 min after `booking_close_time`            | locks tomorrow's bookings, defaults no-shows to "No"                                                              |
+| `lock-confirmations`   | daily cron, **same time** as `lock-bookings`             | locks today's confirmations, auto-copies the booking into confirmed_status for any meal where No Food is disabled |
+| `admin-create-student` | called from the browser (Admin → Students → Add Student) | creates a login + student row using the service role key                                                          |
+| `admin-delete-student` | called from the browser (Admin → Students → Delete)      | permanently deletes a student's auth login, which cascades to their students/bookings/payments rows               |
 
 Booking and confirmation now share one evening window (default 8:30–11:30
 PM, editable under Admin → Settings), so both sweep functions run on the
@@ -98,5 +98,5 @@ curl -X POST "https://YOUR_PROJECT_REF.supabase.co/functions/v1/lock-confirmatio
 ```
 
 Both return JSON like `{"ok":true,"date":"2026-07-16","locked":12,"defaulted":3}`
-(`lock-confirmations` also returns `"recomputed"`, the number of students
-whose fines were finalized for the day).
+(`lock-confirmations` also returns `"autoConfirmed"`, the number of
+untouchable-meal rows it copied the booking into for the day).

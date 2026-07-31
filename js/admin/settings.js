@@ -1,7 +1,7 @@
 // ============================================================================
-// admin/settings.js — edit the `settings` table (meal window, fine amounts,
-// per-meal reference rates). Previously this table could only be edited
-// via raw SQL; this is the UI for it.
+// admin/settings.js — edit the `settings` table (meal window, No Food
+// toggles, per-meal reference rates). Previously this table could only be
+// edited via raw SQL; this is the UI for it.
 // ============================================================================
 import { supabase, MEAL_TYPES, MEAL_LABELS } from "../config.js";
 import { getSettings, invalidateSettingsCache } from "../utils.js";
@@ -14,20 +14,14 @@ export async function renderSettings(root) {
     <div class="card">
       <h3>Meal Selection Window</h3>
       <p class="text-soft" style="font-size:13px;">Shared by both tabs in Mark Food — today's confirmation AND tomorrow's booking are only open during this window (default 8:30 PM–11:30 PM). Outside it, students can't select or submit anything. This is enforced using the server's clock, not any student's device, so it can't be bypassed by changing a phone's date/time.</p>
-      <p class="text-soft" style="font-size:13px;">If you change these, also update the pg_cron schedule time in supabase/CRON.md so the automatic lock/fine sweep stays in sync.</p>
+      <p class="text-soft" style="font-size:13px;">If you change these, also update the pg_cron schedule time in supabase/CRON.md so the automatic lock sweep stays in sync.</p>
       <div class="field"><input type="time" id="s_booking_open" value="${settings.booking_open_time}" placeholder=" "><label>Window opens</label></div>
       <div class="field"><input type="time" id="s_booking_close" value="${settings.booking_close_time}" placeholder=" "><label>Window closes</label></div>
     </div>
 
     <div class="card">
-      <h3>Fine Amounts</h3>
-      <div class="field"><input type="number" id="s_fine_mismatch" value="${settings.fine_mismatch_amount}" placeholder=" " min="0"><label>Today's confirmation doesn't match yesterday's booking (₹, once/day)</label></div>
-      <div class="field"><input type="number" id="s_fine_no_confirm" value="${settings.fine_no_confirmation_amount}" placeholder=" " min="0"><label>No confirmation submitted at all (₹, once/day)</label></div>
-    </div>
-
-    <div class="card">
       <h3>No Food Option</h3>
-      <p class="text-soft" style="font-size:13px;">When enabled for a meal, students can confirm "No Food" instead of Yes/No/Double — booked Yes + confirmed No Food carries no fine, even if it differs from the original booking.</p>
+      <p class="text-soft" style="font-size:13px;">When enabled for a meal, students can confirm "No Food" instead of Yes/No/Double.</p>
       ${MEAL_TYPES.map(
         (m) => `
         <label style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--color-border);">
@@ -61,12 +55,6 @@ export async function renderSettings(root) {
       const updates = {
         booking_open_time: document.getElementById("s_booking_open").value,
         booking_close_time: document.getElementById("s_booking_close").value,
-        fine_mismatch_amount: String(
-          Number(document.getElementById("s_fine_mismatch").value) || 0,
-        ),
-        fine_no_confirmation_amount: String(
-          Number(document.getElementById("s_fine_no_confirm").value) || 0,
-        ),
       };
       MEAL_TYPES.forEach((m) => {
         updates[`no_food_enabled_${m}`] = document.getElementById(

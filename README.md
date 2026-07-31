@@ -140,20 +140,12 @@ before deploying.
     └── schema.sql
 ```
 
-## Fine rules (as implemented in `recompute_daily_fine`)
+## Fine calculation — removed
 
-- **₹250/day** — any mismatch between booking and confirmation for the
-  day (capped at one ₹250 fine per day regardless of how many of the
-  three meals mismatch).
-- **₹100/day** — booked "Yes"/"Double" but never confirmed at all,
-  detected once `confirmation_locked = true` (see the deadline sweep
-  above).
-- **No Food exception** — booked "Yes", confirmed "No Food" (when the
-  admin has enabled No Food for that meal) → no fine.
-
-Both amounts are read from the `settings` table
-(`fine_mismatch_amount`, `fine_no_confirmation_amount`), editable by an
-admin without a code change — see the **Settings** page in the admin app.
+There used to be a ₹250 mismatch fine and a ₹100 no-confirmation fine
+here. Both were removed entirely — see the "Fine calculation removed
+entirely" changelog entry further down for exactly what changed and
+why. No fine is calculated anywhere in the app anymore.
 
 ## Double meals — reference only, never auto-charged
 
@@ -337,6 +329,177 @@ genuinely never acted), not every day for every student by default.
 the trigger and the nightly job will disagree with each other.
 `js/student/booking.js` (tomorrow's booking) is untouched, exactly as
 asked.
+
+## Reports: data-source fix, Monthly Attendance, period-aware exports
+
+**Fixed a real mismatch**: "Daily Attendance Report" (now renamed —
+see below) read `confirmed_status`, while Meal Entries' "Today's Meal
+Marking" table reads `booking_status`. Since the locked-confirmation
+change means `confirmed_status` often stays null until the nightly
+`lock-confirmations` sweep runs, the report could show stale or missing
+data mid-day even though Meal Entries was already correct. The report
+now reads `booking_status` — the exact same field, same query shape —
+so the two can never disagree again. It also now only lists students
+with at least one meal booked Yes/Double, matching Meal Entries exactly.
+
+**Renamed** "Daily Attendance Report" → **"Today's Marking Report"**.
+
+**Added Monthly Attendance Report** — one row per student, one column
+per day of the selected month (e.g. `Jul-01`, `Jul-02`, …), each cell
+stacking all three meals (`BF: Yes` / `LN: No` / `DN: No`). Falls back
+to `confirmed_status` where it's been set (so a day where a student
+genuinely changed their meal via No Food shows what actually happened),
+otherwise `booking_status`. Renders in the same "flat" table mode as
+Meal Entries so the many day-columns scroll horizontally instead of
+stacking into absurdly tall mobile cards.
+
+**Exports are now period-aware, not download-date-aware.** Every
+report's Excel/PDF filename and PDF title now include the actual
+selected reporting date/month/range (`computePeriod()` in
+`reports.js`) — e.g. `attendance-2026-07-24.xlsx` or
+`monthly_attendance-2026-07.pdf` — instead of always looking the same
+regardless of when it's opened later. A "Showing: …" line above the
+table shows the same thing on screen, so it's obvious which period
+you're looking at before you even export.
+
+## Monthly Attendance: grouped Excel export, date filtering, and a real layout bug fix
+
+**Excel export now uses genuine grouped columns** for Monthly
+Attendance — a merged parent header cell per date (e.g. `Jun-01`)
+spanning three real sub-columns (Breakfast / Lunch / Dinner) underneath,
+built with `XLSX` sheet merges (`exportMonthlyAttendanceExcel()` in
+`reports.js`), not just stacked text in one cell. PDF/print still use
+the flattened single-column-per-day version — only Excel gets the
+spreadsheet-native treatment, since that's where it's actually useful
+(sorting/filtering per meal type).
+
+**Date-visibility filter**: a day column (in both the on-screen table
+and the Excel export — computed once and shared) only appears if at
+least one student had at least one meal marked Yes/Double that day.
+Computed across every student regardless of the current name search, so
+searching for one student doesn't hide days just because _they_ didn't
+eat that day.
+
+**Fixed the actual cause of the "not responsive" table bug** — this
+wasn't a missing media query, it was a classic flexbox/grid gotcha:
+flex and grid children have an implicit `min-width: auto`, which means
+once a wide table (Monthly Attendance can have 90+ day-columns) sits
+inside one, the browser refuses to let that container shrink below the
+table's intrinsic content width — so the _entire page_ was overflowing
+sideways instead of just the table's own `.table-wrap` scrolling
+internally the way it was supposed to. Fixed by adding `min-width: 0`
+to `.card` (a flex item in `.page`) and to a newly-added
+`.app-shell__content` class on the desktop grid's content column (the
+`1fr` track has the identical problem, just via CSS Grid instead of
+Flexbox), plus hardening `.table-wrap` itself with explicit
+`width/max-width: 100%`. Table headers now stay properly aligned with
+their data while scrolling as a direct consequence — they're the same
+`<table>` element, so once the container itself stops overflowing,
+there's nothing left for them to visually separate from.
+
+## Meal Entries: "Add Entry" for backfilling missing entries
+
+New button on Today's Meal Marking, for a real gap in the previous
+design: if a student never opened the app (no row exists for them at
+all that day), they simply didn't show up anywhere — there was no way
+to manually create their entry. Add Entry fixes this:
+
+- **Date**: today or yesterday only (native `min`/`max` on the date
+  input); future dates disabled.
+- **Room Number**: dropdown of every room with an active student.
+- **Student Name**: disabled until a room is picked, then populated
+  with only the students in that room who have **zero** booking rows
+  for the selected date — a student who already has any entry (however
+  it looks) doesn't appear, so duplicates are structurally impossible,
+  not just discouraged.
+- **Meal Selection**: Yes/No/Double/No Food per meal, all three
+  required before Save enables.
+
+One data-model detail worth knowing: **No Food can only ever live in
+`confirmed_status`** — `booking_status`'s `CHECK` constraint doesn't
+allow it. So selecting No Food for a meal writes
+`booking_status='yes'` + `confirmed_status='no_food'` (the one
+combination the fine logic already recognizes as the deliberate
+no-fine exception); every other choice writes the same value to both
+columns, so the entry is immediately consistent — no mismatch, no fine,
+exactly as if the student had booked and confirmed it themselves.
+
+**Database change required**: the trigger previously only allowed an
+admin to write today's or tomorrow's date. It now also allows
+yesterday's date, but _only for brand-new rows_ (`TG_OP = 'INSERT'`) —
+never an update of something that already exists there. This is
+deliberately narrow: it's exactly what Add Entry needs and nothing
+more; the existing per-student Edit override on Meal Entries is still
+today-only, unchanged. Run **`sql/PATCH_2026-07-30_add_entry.sql`** on
+a live database.
+
+No other part of the app needed to change — Dashboard, both Attendance
+reports, and everything else read directly from the same `bookings`
+table, so a backfilled entry surfaces everywhere automatically the
+moment it's saved.
+
+**Correction**: "already marked" (the check that hides a student from
+the Student dropdown) originally meant "has any row at all for that
+date" — but the nightly sweep auto-fills every untouched meal to "No"
+every night, so nearly every student already has such a row for
+yesterday, making them permanently invisible to Add Entry even though
+nothing meaningful had actually been recorded for them. Fixed to match
+the same "at least one Yes/Double" definition used everywhere else in
+the app (Meal Entries, both Attendance reports) — a student whose rows
+are all "No" is still treated as available. The trigger's yesterday
+restriction was relaxed to match: an `UPDATE` to yesterday's date is
+now allowed when the existing row isn't a real entry yet (mirrors the
+same check), not just a fresh `INSERT`— otherwise Add Entry's upsert
+would hit that auto-filled row and get rejected. A genuinely
+already-marked yesterday entry still can't be overwritten this way.
+
+## Fine calculation removed entirely
+
+No fine is ever charged anymore, anywhere — the ₹250 mismatch fine and
+₹100 no-confirmation fine are both gone. Every call site was removed,
+not just hidden:
+
+- `recompute_daily_fine()` (in `sql/schema.sql`) is now a genuine
+  no-op — nothing calls it anymore, but it's kept as an inert stub
+  (rather than dropped) so a stale cached client build that still
+  tries the RPC gets a harmless success instead of a hard error.
+- The nightly `lock-confirmations` Edge Function no longer runs the
+  fine sweep — it still locks confirmations and auto-copies
+  `booking_status` into `confirmed_status` for No-Food-disabled meals
+  (that part has nothing to do with fines; it's what keeps reports
+  meaningful), it just doesn't call `recompute_daily_fine` afterward
+  anymore.
+- Removed from the UI entirely: Fine Report (Reports), Fine Amounts
+  (Admin → Settings), "Fine Collection" card (Admin Dashboard),
+  "Fines this month" card and Fine Amount column (Student
+  Dashboard/History).
+- Admin's meal override still keeps `confirmed_status` in sync with a
+  changed `booking_status` for the specific meal touched — that logic
+  was originally there to prevent a false fine, but it's kept because
+  it's still useful independent of fines: without it, Students
+  Report / Monthly Attendance Report (which read `confirmed_status`)
+  would keep showing the old value even after an admin's correction.
+- Admin Dashboard's "Monthly Revenue" figure is now just payments
+  collected — it no longer adds fine collection on top, since there's
+  no fine collection to add.
+
+**What was deliberately left alone, and why**: the `fines` table and
+`bookings.fine_amount` column both still exist with any historical
+data intact — nothing reads or writes them anymore, but dropping them
+outright felt like a separate, more destructive decision than "stop
+calculating new fines." If you're confident you don't need that
+history, `sql/OPTIONAL_drop_fines_table.sql` removes the table,
+its RLS policies, and the function outright (not reversible).
+
+**Database change required**: run
+`sql/PATCH_2026-08-04_remove_fines.sql` on a live database (replaces
+`recompute_daily_fine()` with the no-op and removes the two
+now-unused fine-amount settings rows), then redeploy
+`lock-confirmations`:
+
+```bash
+supabase functions deploy lock-confirmations
+```
 
 ## Not yet wired up (clearly-scoped follow-ups)
 

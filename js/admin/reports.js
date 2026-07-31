@@ -1,5 +1,5 @@
 // ============================================================================
-// admin/reports.js — 7 report types. Every report returns { rows, summary,
+// admin/reports.js — 6 report types. Every report returns { rows, summary,
 // columns? } from its fetch() — summary (an array of { label, value } pairs,
 // or empty) is rendered as cards above the table AND passed into the export
 // functions, so the downloaded Excel/PDF file always shows the exact same
@@ -47,12 +47,6 @@ const REPORT_TYPES = {
     flat: true,
     fetch: fetchMonthlyAttendanceReport,
   },
-  fine: {
-    label: "Fine Report",
-    filters: ["search", "month", "from", "to"],
-    fetch: fetchFineReport,
-    columns: fineColumns(),
-  },
   tomorrow_booking: {
     label: "Tomorrow Booking Report",
     filters: ["search"],
@@ -80,7 +74,6 @@ const REPORT_HINTS = {
     "Today's meal marking — students with at least one meal booked Yes/Double, same data as Meal Entries.",
   monthly_attendance:
     "Every day of the selected month, Breakfast/Lunch/Dinner status side by side, per student.",
-  fine: "Every fine charged, grouped per student. Filter by month or a date range.",
   tomorrow_booking:
     "Tomorrow's bookings — students with at least one meal booked Yes/Double.",
   expense: "All expenses, filterable by month or date range.",
@@ -299,7 +292,6 @@ function computePeriod(type, f) {
       const d = tomorrowISO();
       return { label: formatDate(d), slug: d };
     }
-    case "fine":
     case "expense":
     case "grocery": {
       if (f.month) return { label: monthYearLabel(f.month), slug: f.month };
@@ -630,76 +622,7 @@ async function fetchMonthlyAttendanceReport(f) {
   return { rows, columns, summary: [] };
 }
 
-// ---- 4. Fine Report ------------------------------------------------------------
-function fineColumns() {
-  return [
-    { key: "name", label: "Student Name" },
-    { key: "room", label: "Room No" },
-    { key: "dates", label: "Fine Date(s)" },
-    { key: "amount", label: "Fine Amount", render: (r) => currency(r.amount) },
-  ];
-}
-async function fetchFineReport(f) {
-  let q = supabase
-    .from("fines")
-    .select("*, students(name, room_number)")
-    .order("date", { ascending: false });
-  if (f.month) {
-    const [y, m] = f.month.split("-");
-    q = q
-      .gte("date", `${y}-${m}-01`)
-      .lte(
-        "date",
-        new Date(Number(y), Number(m), 0).toISOString().slice(0, 10),
-      );
-  }
-  if (f.from) q = q.gte("date", f.from);
-  if (f.to) q = q.lte("date", f.to);
-  const { data } = await q;
-  let fines = data || [];
-  if (f.search)
-    fines = fines.filter((r) =>
-      r.students?.name.toLowerCase().includes(f.search),
-    );
-
-  const byStudent = {};
-  fines.forEach((r) => {
-    const key = r.student_id;
-    byStudent[key] = byStudent[key] || {
-      name: r.students?.name || "—",
-      room: r.students?.room_number || "—",
-      dates: [],
-      amount: 0,
-    };
-    byStudent[key].dates.push(r.date);
-    byStudent[key].amount += Number(r.amount);
-  });
-
-  const rows = Object.values(byStudent)
-    .map((r) => ({
-      ...r,
-      dates: r.dates
-        .sort()
-        .map((d) => formatDate(d))
-        .join(", "),
-    }))
-    .sort((a, b) => b.amount - a.amount);
-
-  const totalFine = rows.reduce((s, r) => s + r.amount, 0);
-
-  return {
-    rows,
-    summary: [
-      {
-        label: "Total Fine Amount",
-        value: currency(totalFine),
-        icon: "fa-coins",
-      },
-    ],
-  };
-}
-
-// ---- 5. Tomorrow Booking Report -------------------------------------------------
+// ---- 4. Tomorrow Booking Report -------------------------------------------------
 function tomorrowBookingColumns() {
   return [
     { key: "name", label: "Student Name" },
@@ -792,7 +715,7 @@ async function fetchTomorrowBookingReport(f) {
   };
 }
 
-// ---- 6 & 7. Expense / Grocery Report --------------------------------------------
+// ---- 5 & 6. Expense / Grocery Report --------------------------------------------
 function expenseColumns() {
   return [
     { key: "date", label: "Date", render: (r) => formatDate(r.date) },

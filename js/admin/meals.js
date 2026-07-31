@@ -357,12 +357,28 @@ function openOverrideModal(studentRow, date, onSaved) {
     saveBtn.disabled = true;
     saveBtn.textContent = "Saving…";
 
-    const payload = MEAL_TYPES.map((meal) => ({
-      student_id: studentRow.student_id,
-      date,
-      meal_type: meal,
-      booking_status: newValues[meal],
-    }));
+    const payload = MEAL_TYPES.map((meal) => {
+      const original = studentRow.meals[meal]?.booking_status || null;
+      const row = {
+        student_id: studentRow.student_id,
+        date,
+        meal_type: meal,
+        booking_status: newValues[meal],
+      };
+      // If this meal's booking actually changed, keep confirmed_status in
+      // sync with it — otherwise the Students Report / Monthly Attendance
+      // Report (which read confirmed_status for their totals) would still
+      // show the OLD value for this meal even though the admin just
+      // corrected the booking. Only the meal(s) actually changed are
+      // touched here — an untouched meal's real confirmed_status (e.g. a
+      // student's own No Food choice) is never overwritten.
+      if (newValues[meal] !== original) {
+        row.confirmed_status = newValues[meal];
+        row.confirmation_locked = true;
+        row.confirmed_at = new Date().toISOString();
+      }
+      return row;
+    });
 
     const { error } = await supabase
       .from("bookings")
@@ -374,10 +390,6 @@ function openOverrideModal(studentRow, date, onSaved) {
       return;
     }
 
-    await supabase.rpc("recompute_daily_fine", {
-      p_student_id: studentRow.student_id,
-      p_date: date,
-    });
     toast.success("Overrides saved");
     closeModal();
     onSaved();
@@ -396,10 +408,9 @@ function openOverrideModal(studentRow, date, onSaved) {
  * Meal Selection offers Yes/No/Double/No Food per meal. No Food can only
  * ever live in confirmed_status (booking_status's CHECK constraint doesn't
  * allow it), so selecting it writes booking_status='yes' + confirmed_status
- * ='no_food' — the one combination the fine logic already treats as the
- * deliberate no-fine exception. Every other choice writes the same value
- * to both columns, so the entry is immediately consistent (no mismatch,
- * no fine) exactly as if the student had booked and confirmed it themselves.
+ * ='no_food'. Every other choice writes the same value to both columns, so
+ * the entry is immediately consistent — exactly as if the student had
+ * booked and confirmed it themselves.
  */
 async function openAddEntryModal(onSaved) {
   const today = todayISO();
@@ -584,10 +595,6 @@ async function openAddEntryModal(onSaved) {
       return;
     }
 
-    await supabase.rpc("recompute_daily_fine", {
-      p_student_id: selectedStudentId,
-      p_date: date,
-    });
     if (date === today) {
       toast.success("Entry added");
     } else {

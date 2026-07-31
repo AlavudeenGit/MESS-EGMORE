@@ -10,7 +10,6 @@ import {
   tomorrowISO,
   initTheme,
   toggleTheme,
-  currency,
   formatDate,
 } from "../utils.js";
 import { toast } from "../components/Toast.js";
@@ -71,24 +70,18 @@ async function renderHome(root, ctx) {
   const today = todayISO();
   const tomorrow = tomorrowISO();
 
-  const [{ data: todayRows }, { data: tomorrowRows }, { data: fineRows }] =
-    await Promise.all([
-      supabase
-        .from("bookings")
-        .select("*")
-        .eq("student_id", ctx.profile.id)
-        .eq("date", today),
-      supabase
-        .from("bookings")
-        .select("*")
-        .eq("student_id", ctx.profile.id)
-        .eq("date", tomorrow),
-      supabase
-        .from("fines")
-        .select("amount")
-        .eq("student_id", ctx.profile.id)
-        .gte("date", today.slice(0, 7) + "-01"),
-    ]);
+  const [{ data: todayRows }, { data: tomorrowRows }] = await Promise.all([
+    supabase
+      .from("bookings")
+      .select("*")
+      .eq("student_id", ctx.profile.id)
+      .eq("date", today),
+    supabase
+      .from("bookings")
+      .select("*")
+      .eq("student_id", ctx.profile.id)
+      .eq("date", tomorrow),
+  ]);
 
   const confirmStatuses = {};
   MEAL_TYPES.forEach((m) => {
@@ -99,7 +92,6 @@ async function renderHome(root, ctx) {
   const bookedCount = (tomorrowRows || []).filter(
     (r) => r.booking_status,
   ).length;
-  const totalFines = (fineRows || []).reduce((s, f) => s + Number(f.amount), 0);
 
   root.innerHTML = `
     <section class="status-hero">
@@ -110,7 +102,6 @@ async function renderHome(root, ctx) {
 
     <div class="card-grid">
       <div class="card"><div class="card__label">Tomorrow booked</div><div class="card__value">${bookedCount}/3</div></div>
-      <div class="card"><div class="card__label">Fines this month</div><div class="card__value text-danger">${currency(totalFines)}</div></div>
     </div>
 
     <div class="card">

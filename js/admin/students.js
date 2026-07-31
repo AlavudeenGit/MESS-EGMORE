@@ -233,7 +233,7 @@ async function toggleStatus(student, onDone) {
 
 async function deleteStudent(id, name, onDone) {
   const ok = await confirmDialog(
-    `PERMANENTLY delete ${name}? This removes their account and every booking, fine, and payment record — it cannot be undone. If you just want to disable their login while keeping their history, use Deactivate instead.`,
+    `PERMANENTLY delete ${name}? This removes their account and every booking and payment record — it cannot be undone. If you just want to disable their login while keeping their history, use Deactivate instead.`,
     { confirmLabel: "Permanently Delete" },
   );
   if (!ok) return;
