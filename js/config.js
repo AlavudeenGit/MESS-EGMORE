@@ -84,8 +84,6 @@ export const DEFAULT_SETTINGS = {
   booking_open_time: "20:30",
   booking_close_time: "23:30",
   confirmation_deadline: "11:59",
-  fine_mismatch_amount: "250",
-  fine_no_confirmation_amount: "100",
   no_food_enabled_breakfast: "false",
   no_food_enabled_lunch: "false",
   no_food_enabled_dinner: "false",

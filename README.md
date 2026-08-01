@@ -531,6 +531,38 @@ REST API instead, both covered in that file).
 
 **Deploy required**: `supabase functions deploy student-register`
 
+## Fixed: Today's Confirmation and Tomorrow's Booking locking each other
+
+Reported symptom: submitting Today's Confirmation (or just the evening
+window closing from normal time passing) could make Tomorrow's Booking
+look locked too, even though nothing about the confirmation itself
+caused it. Root cause: both features checked the same
+`booking_open_time`/`booking_close_time` window (see the "shared
+window" changelog entry further down — this supersedes it for
+Confirmation specifically).
+
+Fixed by removing the window check from confirmation entirely — Today's
+Confirmation is now gated ONLY by two things: whether it's already been
+submitted (`confirmation_locked`), and whether the admin has enabled No
+Food for that specific meal. No time-of-day check at all. Tomorrow's
+Booking is unchanged — it still uses the window exactly as before. The
+two now share no state or settings key, so one can never affect the
+other's editability, at either layer:
+
+- **Client** (`js/student/confirmation.js`): when a meal is editable
+  (No Food enabled for it), only two options are ever shown — the
+  patched value carried over from yesterday's booking, and No Food.
+  Nothing else. A non-editable meal shows the patched value read-only
+  with no option group at all.
+- **Database** (`enforce_booking_write` in `sql/schema.sql`): the
+  `confirmed_status` branch of the trigger no longer references the
+  window at all — only the lock flag and the per-meal No Food setting.
+
+**Deploy required** — this needs the database patch or the old trigger
+(which still ties confirmation to the window) stays in effect no
+matter what the frontend code does:
+`sql/PATCH_2026-08-10_decouple_confirmation_window.sql`
+
 ## Not yet wired up (clearly-scoped follow-ups)
 
 - Image/bill uploads for expenses (`expenses.bill_url` column exists;

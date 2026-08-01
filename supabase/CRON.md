@@ -10,9 +10,14 @@ Four functions live in `supabase/functions/`:
 | `admin-delete-student` | called from the browser (Admin → Students → Delete)             | permanently deletes a student's auth login, which cascades to their students/bookings/payments rows               |
 | `student-register`     | called from the browser (the registration form on `index.html`) | creates the auth login + students row atomically, rolling back the login if the students insert fails             |
 
-Booking and confirmation now share one evening window (default 8:30–11:30
-PM, editable under Admin → Settings), so both sweep functions run on the
-same schedule — there's no separate morning deadline anymore.
+`lock-bookings` and `lock-confirmations` are scheduled at the same time
+purely for operational simplicity (one nightly maintenance run instead of
+two schedules to keep track of) — Today's Confirmation itself does NOT
+depend on this window at all anymore (see `js/student/confirmation.js`);
+only Tomorrow's Booking does. `lock-confirmations` still needs to run
+once nightly regardless, to lock the day's confirmations and auto-copy
+the booking into `confirmed_status` for any meal where No Food is
+disabled.
 
 ## 1. Deploy
 

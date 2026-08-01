@@ -13,7 +13,7 @@ export async function renderSettings(root) {
   root.innerHTML = `
     <div class="card">
       <h3>Meal Selection Window</h3>
-      <p class="text-soft" style="font-size:13px;">Shared by both tabs in Mark Food — today's confirmation AND tomorrow's booking are only open during this window (default 8:30 PM–11:30 PM). Outside it, students can't select or submit anything. This is enforced using the server's clock, not any student's device, so it can't be bypassed by changing a phone's date/time.</p>
+      <p class="text-soft" style="font-size:13px;">Controls Tomorrow's Booking only (default 8:30 PM–11:30 PM) — enforced using the server's clock, not any student's device, so it can't be bypassed by changing a phone's date/time. Today's Confirmation does NOT use this window at all; it's independent, gated only by whether No Food is enabled per meal below and whether the student has already submitted.</p>
       <p class="text-soft" style="font-size:13px;">If you change these, also update the pg_cron schedule time in supabase/CRON.md so the automatic lock sweep stays in sync.</p>
       <div class="field"><input type="time" id="s_booking_open" value="${settings.booking_open_time}" placeholder=" "><label>Window opens</label></div>
       <div class="field"><input type="time" id="s_booking_close" value="${settings.booking_close_time}" placeholder=" "><label>Window closes</label></div>
