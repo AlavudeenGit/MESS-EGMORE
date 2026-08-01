@@ -501,6 +501,36 @@ now-unused fine-amount settings rows), then redeploy
 supabase functions deploy lock-confirmations
 ```
 
+## Fixed: deleted/rejected students blocking re-registration with "already registered"
+
+This looked like a Delete bug but wasn't — `admin-delete-student`'s hard
+delete via the Admin API was always correct. The real bug was in
+**registration**: `submitRegistration` used to call `auth.signUp()` and
+then insert the `students` row as two separate client-side steps. If the
+second step ever failed for any reason (network blip, a conflict, anything),
+the auth login from the first step was never cleaned up — leaving an
+orphaned login with no matching `students` row. That's invisible
+everywhere in the admin UI (not in Students, not in Registrations), but
+the email stays permanently locked in Supabase Auth, so any future
+registration attempt with that email fails with "already registered" and
+there's nothing visible for an admin to delete.
+
+Fixed by moving the whole registration into one atomic Edge Function
+(**`student-register`**) that creates the auth login and the `students`
+row together, server-side, and rolls back the auth login if the insert
+fails. `js/auth.js`'s `submitRegistration` now just calls this function
+instead of doing the two steps itself.
+
+**If this already happened to you** (an email says "already registered"
+but you've never approved or rejected anyone with that email), see
+**`supabase/CLEANUP_orphaned_auth_users.md`** — a read-only SQL query to
+find any orphaned logins, plus how to safely clear them (not via raw SQL
+`DELETE FROM auth.users`, which can leave Supabase's internal
+session/identity tables inconsistent — use the Dashboard or the Admin
+REST API instead, both covered in that file).
+
+**Deploy required**: `supabase functions deploy student-register`
+
 ## Not yet wired up (clearly-scoped follow-ups)
 
 - Image/bill uploads for expenses (`expenses.bill_url` column exists;

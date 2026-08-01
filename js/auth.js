@@ -55,8 +55,16 @@ export async function login(email, password) {
 
 /**
  * Student self-registration (link shared by admin — not publicly discoverable).
- * Creates an auth user + a `students` row with status = 'pending'.
- * The row only becomes usable once an admin approves it (Registration Approval page).
+ * Creates an auth user + a `students` row with status = 'pending', via the
+ * student-register Edge Function — this MUST be atomic (not two separate
+ * client-side calls), or a failure partway through leaves an orphaned auth
+ * login with no matching students row: invisible in the admin UI, but the
+ * email stays permanently locked in Supabase Auth, so any future
+ * registration attempt with that email fails with "already registered" and
+ * there's nothing visible for an admin to delete. The Edge Function rolls
+ * back the auth user it creates if the students insert fails, so this can't
+ * happen. The row only becomes usable once an admin approves it (Registration
+ * Approval page).
  *
  * No OTP / email-click verification is used anywhere in this flow — email is
  * just a username. Make sure "Confirm email" is turned OFF in the Supabase
@@ -70,27 +78,12 @@ export async function submitRegistration({
   email,
   password,
 }) {
-  const { data, error } = await supabase.auth.signUp({ email, password });
-  if (error) {
-    toast.error(error.message || "Could not create account");
-    return false;
-  }
-  if (!data.user) {
-    toast.error("Registration failed — please try again");
-    return false;
-  }
-
-  const { error: insertError } = await supabase.from("students").insert({
-    id: data.user.id,
-    name,
-    room_number,
-    mobile,
-    email,
-    status: "pending",
+  const { data, error } = await supabase.functions.invoke("student-register", {
+    body: { name, room_number, mobile, email, password },
   });
 
-  if (insertError) {
-    toast.error("Could not save your details: " + insertError.message);
+  if (error || !data?.ok) {
+    toast.error(data?.error || error?.message || "Could not create account");
     return false;
   }
 
