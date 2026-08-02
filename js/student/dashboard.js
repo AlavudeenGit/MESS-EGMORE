@@ -11,6 +11,7 @@ import {
   initTheme,
   toggleTheme,
   formatDate,
+  effectiveMealStatus,
 } from "../utils.js";
 import { toast } from "../components/Toast.js";
 import { thaliRing } from "../components/Card.js";
@@ -86,7 +87,7 @@ async function renderHome(root, ctx) {
   const confirmStatuses = {};
   MEAL_TYPES.forEach((m) => {
     const row = (todayRows || []).find((r) => r.meal_type === m);
-    confirmStatuses[m] = row?.confirmed_status || "pending";
+    confirmStatuses[m] = effectiveMealStatus(row) || "pending";
   });
 
   const bookedCount = (tomorrowRows || []).filter(

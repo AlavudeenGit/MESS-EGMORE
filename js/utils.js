@@ -3,6 +3,23 @@
 // ============================================================================
 import { supabase, DEFAULT_SETTINGS } from "./config.js";
 
+// ---- meal status helper -----------------------------------------------------
+/**
+ * The single "what's actually true for this meal right now" value, used
+ * consistently everywhere a meal's current state is displayed or counted:
+ * Meal Entries, the admin Dashboard's summary cards, Reports, and student
+ * History. Prefers confirmed_status (what the student actually confirmed —
+ * this is the only field No Food can ever change) and falls back to
+ * booking_status (what was booked the night before, still true until/unless
+ * a confirmation changes it). Before this helper existed, some screens read
+ * booking_status only, so a student switching to No Food during Today's
+ * Confirmation was invisible on those screens even though it showed
+ * correctly in their own History — this is what keeps them all in sync.
+ */
+export function effectiveMealStatus(row) {
+  return row?.confirmed_status || row?.booking_status || null;
+}
+
 // ---- date helpers -----------------------------------------------------------
 export function todayISO() {
   return toISO(new Date());

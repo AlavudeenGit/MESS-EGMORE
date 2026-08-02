@@ -3,7 +3,12 @@
 // One row per DATE, with Breakfast/Lunch/Dinner status side-by-side.
 // ============================================================================
 import { supabase, MEAL_LABELS, STATUS_LABELS } from "../config.js";
-import { formatDate, exportToExcel, exportToPDF } from "../utils.js";
+import {
+  formatDate,
+  exportToExcel,
+  exportToPDF,
+  effectiveMealStatus,
+} from "../utils.js";
 import { renderTable } from "../components/Table.js";
 
 export async function renderHistory(root, ctx) {
@@ -53,8 +58,7 @@ export async function renderHistory(root, ctx) {
     const byDate = {};
     (bookingRows || []).forEach((r) => {
       byDate[r.date] = byDate[r.date] || {};
-      byDate[r.date][r.meal_type] =
-        r.confirmed_status || r.booking_status || null;
+      byDate[r.date][r.meal_type] = effectiveMealStatus(r);
     });
 
     const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));

@@ -4,25 +4,34 @@
 // Layout:
 //   1. Six summary cards: Today's Meals (B/L/D totals) + Tomorrow's
 //      Bookings (B/L/D totals).
-//   2. "Today's Meal Marking" table — TODAY's booking status per student
-//      (what was booked yesterday evening for today). Editable via the
+//   2. "Today's Meal Marking" table — TODAY's effective status per student
+//      per meal (see utils.js:effectiveMealStatus — confirmed_status if the
+//      student has confirmed something, e.g. via No Food, otherwise falls
+//      back to what was booked yesterday evening). Editable via the
 //      override modal, but ONLY today's date — the DB trigger itself
 //      refuses any admin write to another date for an individual student.
-//   3. "Tomorrow Booking" table — TOMORROW's booking status per student,
-//      read-only (no per-student edit; only the bulk-cancel action below
-//      is allowed to touch tomorrow's date).
+//   3. "Tomorrow Booking" table — TOMORROW's booking status per student
+//      (there's no confirmation process for a future date yet, so this is
+//      always just the raw booking), read-only — only the bulk-cancel
+//      action below is allowed to touch tomorrow's date.
 //
-// Both tables only list students with at least one meal booked Yes/Double
-// for that respective day — a student who booked No everywhere (or
-// nothing at all) has nothing for the kitchen to act on, so they're
-// hidden rather than cluttering the list.
+// Both tables only list students with at least one meal at Yes/Double
+// (by effective status) for that respective day — a student who booked No
+// everywhere, or switched to No Food, has nothing for the kitchen to act
+// on, so they're hidden rather than cluttering the list.
 //
 // Both tables render in "flat" mode (see Table.js / css/main.css
 // .data-table--flat) so mobile shows the same real scrollable table as
 // desktop, not the stacked-card view used elsewhere in the app.
 // ============================================================================
 import { supabase, MEAL_TYPES, MEAL_LABELS, STATUS_LABELS } from "../config.js";
-import { todayISO, tomorrowISO, formatDate, debounce } from "../utils.js";
+import {
+  todayISO,
+  tomorrowISO,
+  formatDate,
+  debounce,
+  effectiveMealStatus,
+} from "../utils.js";
 import { renderTable } from "../components/Table.js";
 import { statCard } from "../components/Card.js";
 import { openModal, closeModal, confirmDialog } from "../components/Modal.js";
@@ -77,11 +86,11 @@ export async function renderMeals(root) {
       await Promise.all([
         supabase
           .from("bookings")
-          .select("meal_type, booking_status")
+          .select("meal_type, booking_status, confirmed_status")
           .eq("date", today),
         supabase
           .from("bookings")
-          .select("meal_type, booking_status")
+          .select("meal_type, booking_status, confirmed_status")
           .eq("date", tomorrow),
       ]);
     const todayCounts = countByMeal(todayBookings);
@@ -127,7 +136,7 @@ export async function renderMeals(root) {
     let rows = groupByStudent(data);
     rows = rows.filter((r) =>
       MEAL_TYPES.some((m) =>
-        ["yes", "double"].includes(r.meals[m]?.booking_status),
+        ["yes", "double"].includes(effectiveMealStatus(r.meals[m])),
       ),
     );
     if (state.searchToday) {
@@ -146,7 +155,7 @@ export async function renderMeals(root) {
       ...MEAL_TYPES.map((meal) => ({
         key: meal,
         label: MEAL_LABELS[meal],
-        render: (r) => bookingBadgeHTML(r.meals[meal]?.booking_status),
+        render: (r) => bookingBadgeHTML(effectiveMealStatus(r.meals[meal])),
       })),
       {
         key: "actions",
@@ -181,7 +190,7 @@ export async function renderMeals(root) {
     const { data, error } = await supabase
       .from("bookings")
       .select(
-        "id, student_id, meal_type, booking_status, students(name, room_number)",
+        "id, student_id, meal_type, booking_status, confirmed_status, students(name, room_number)",
       )
       .eq("date", tomorrow);
     if (error) {
@@ -193,7 +202,7 @@ export async function renderMeals(root) {
     let rows = groupByStudent(data);
     rows = rows.filter((r) =>
       MEAL_TYPES.some((m) =>
-        ["yes", "double"].includes(r.meals[m]?.booking_status),
+        ["yes", "double"].includes(effectiveMealStatus(r.meals[m])),
       ),
     );
     if (state.searchTomorrow) {
@@ -211,7 +220,7 @@ export async function renderMeals(root) {
       ...MEAL_TYPES.map((meal) => ({
         key: meal,
         label: MEAL_LABELS[meal],
-        render: (r) => bookingBadgeHTML(r.meals[meal]?.booking_status),
+        render: (r) => bookingBadgeHTML(effectiveMealStatus(r.meals[meal])),
       })),
     ];
     document.getElementById("tomorrowTable").innerHTML = renderTable(

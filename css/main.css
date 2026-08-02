@@ -514,7 +514,7 @@ img {
   background: var(--color-double-soft);
   color: var(--color-double);
 }
-.badge-nofood {
+.badge-no_food {
   background: var(--color-no-food-soft);
   color: var(--color-ink-soft);
 }

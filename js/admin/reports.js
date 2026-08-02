@@ -24,6 +24,7 @@ import {
   tomorrowISO,
   exportToExcelWithSummary,
   exportToPDFWithSummary,
+  effectiveMealStatus,
 } from "../utils.js";
 import { renderTable } from "../components/Table.js";
 import { statCard } from "../components/Card.js";
@@ -352,13 +353,13 @@ async function fetchStudentsReport(f) {
 
   const { data: mealRows } = await supabase
     .from("bookings")
-    .select("student_id, meal_type, confirmed_status")
-    .in("confirmed_status", ["yes", "double"])
+    .select("student_id, meal_type, booking_status, confirmed_status")
     .gte("date", monthStart)
     .lte("date", monthEnd);
 
   const countsByStudent = {};
   (mealRows || []).forEach((r) => {
+    if (!["yes", "double"].includes(effectiveMealStatus(r))) return;
     countsByStudent[r.student_id] = countsByStudent[r.student_id] || {
       breakfast: 0,
       lunch: 0,
@@ -380,11 +381,10 @@ async function fetchStudentsReport(f) {
 }
 
 // ---- 2. Today's Marking Report (formerly "Daily Attendance Report") ------------
-// Uses booking_status — the SAME field Meal Entries' "Today's Meal Marking"
-// table reads — so the two can never disagree. (Previously this read
-// confirmed_status, which now stays null until the nightly lock-confirmations
-// sweep runs for any meal where No Food is disabled, causing exactly the
-// mismatch that was reported.)
+// Uses effectiveMealStatus (utils.js) — confirmed_status if the student has
+// confirmed something (e.g. via No Food), otherwise falls back to
+// booking_status — the SAME logic Meal Entries' "Today's Meal Marking"
+// table uses, so the two can never disagree.
 function attendanceColumns() {
   return [
     { key: "name", label: "Student Name" },
@@ -421,7 +421,7 @@ async function fetchAttendanceReport(f) {
   const { data, error } = await supabase
     .from("bookings")
     .select(
-      "student_id, meal_type, booking_status, students(name, room_number)",
+      "student_id, meal_type, booking_status, confirmed_status, students(name, room_number)",
     )
     .eq("date", date);
   if (error || !data) return { rows: [], summary: [] };
@@ -435,11 +435,11 @@ async function fetchAttendanceReport(f) {
       lunch: null,
       dinner: null,
     };
-    byStudent[r.student_id][r.meal_type] = r.booking_status;
+    byStudent[r.student_id][r.meal_type] = effectiveMealStatus(r);
   });
 
-  // only students with at least one meal booked Yes/Double — matches
-  // Meal Entries exactly
+  // only students with at least one meal at Yes/Double (by effective
+  // status) — matches Meal Entries exactly
   let rows = Object.values(byStudent).filter((r) =>
     MEAL_TYPES.some((m) => ["yes", "double"].includes(r[m])),
   );
@@ -587,8 +587,7 @@ async function fetchMonthlyAttendanceReport(f) {
   (bookingRows || []).forEach((r) => {
     dataMap[r.student_id] = dataMap[r.student_id] || {};
     dataMap[r.student_id][r.date] = dataMap[r.student_id][r.date] || {};
-    dataMap[r.student_id][r.date][r.meal_type] =
-      r.confirmed_status || r.booking_status || null;
+    dataMap[r.student_id][r.date][r.meal_type] = effectiveMealStatus(r);
   });
 
   // date-visibility filter: a day column only appears if AT LEAST ONE

@@ -28,7 +28,7 @@
 // completely separate date, untouched by this write.
 // ============================================================================
 import { supabase, MEAL_TYPES, MEAL_LABELS, STATUS_LABELS } from "../config.js";
-import { todayISO, getSettings } from "../utils.js";
+import { todayISO, getSettings, effectiveMealStatus } from "../utils.js";
 import { toast } from "../components/Toast.js";
 
 export async function renderConfirmationPanel(container, ctx) {
@@ -55,8 +55,7 @@ export async function renderConfirmationPanel(container, ctx) {
   // confirmed, falling back to yesterday's booking (the "patched" value)
   const selection = {};
   MEAL_TYPES.forEach((m) => {
-    selection[m] =
-      byMeal[m]?.confirmed_status || byMeal[m]?.booking_status || null;
+    selection[m] = effectiveMealStatus(byMeal[m]);
   });
 
   const anyEditable = MEAL_TYPES.some((m) => isEditable(byMeal[m], settings));
@@ -95,7 +94,7 @@ function mealCardHTML(meal, row, selectedValue, settings) {
 
   if (!editable) {
     // frozen to the booking — no option group, nothing to tap
-    const displayValue = row?.confirmed_status || row?.booking_status;
+    const displayValue = effectiveMealStatus(row);
     return `
       <div class="card meal-card" data-meal="${meal}">
         <div class="meal-card__head">
@@ -174,17 +173,18 @@ async function submitConfirmations(
   settings,
 ) {
   const submitBtn = container.querySelector("#submitConfirmation");
-  const changed = MEAL_TYPES.filter((m) => {
+
+  // submit every EDITABLE meal with a real selection — no requirement that
+  // it differ from the patched value. Confirming "yes, that's still right"
+  // is just as valid a submission as switching to No Food.
+  const toSubmit = MEAL_TYPES.filter((m) => {
     const row = byMeal[m];
     if (!isEditable({ ...row, meal_type: m }, settings)) return false;
-    const current = row?.confirmed_status || row?.booking_status || null;
-    return selection[m] && selection[m] !== current;
+    return !!selection[m];
   });
 
-  if (!changed.length) {
-    toast.info(
-      "Select a different option for at least one editable meal before submitting.",
-    );
+  if (!toSubmit.length) {
+    toast.info("No meals are open for confirmation right now.");
     return;
   }
 
@@ -194,7 +194,7 @@ async function submitConfirmations(
 
   // this only ever writes rows for `date` (today) — Tomorrow's Booking
   // lives on a completely different date and is never touched here
-  const payload = changed.map((meal) => ({
+  const payload = toSubmit.map((meal) => ({
     student_id: ctx.profile.id,
     date,
     meal_type: meal,

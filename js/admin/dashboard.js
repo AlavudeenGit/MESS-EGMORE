@@ -1,12 +1,7 @@
 // ============================================================================
 // admin/dashboard.js — SPA router for the admin app + home overview
 // ============================================================================
-import {
-  supabase,
-  MEAL_TYPES,
-  MEAL_LABELS,
-  EXPENSE_CATEGORY_LABELS,
-} from "../config.js";
+import { supabase, EXPENSE_CATEGORY_LABELS } from "../config.js";
 import {
   requireRole,
   initTheme,
@@ -14,6 +9,7 @@ import {
   todayISO,
   currency,
   formatDate,
+  effectiveMealStatus,
 } from "../utils.js";
 import { statCard } from "../components/Card.js";
 import { openModal, closeModal } from "../components/Modal.js";
@@ -127,8 +123,7 @@ async function renderHome(root) {
     { count: totalStudents },
     { count: activeStudents },
     { count: pendingRegs },
-    { data: todayBookings },
-    { data: todayConfirms },
+    { data: todayRows },
     { data: monthExpenses },
     { data: monthPayments },
     { data: recentStudents },
@@ -145,11 +140,7 @@ async function renderHome(root) {
       .eq("status", "pending"),
     supabase
       .from("bookings")
-      .select("meal_type, booking_status")
-      .eq("date", today),
-    supabase
-      .from("bookings")
-      .select("meal_type, confirmed_status")
+      .select("meal_type, booking_status, confirmed_status")
       .eq("date", today),
     supabase.from("expenses").select("amount").gte("date", monthStart),
     supabase
@@ -168,8 +159,14 @@ async function renderHome(root) {
       .limit(5),
   ]);
 
-  const bookingCounts = countByMeal(todayBookings, "booking_status");
-  const confirmedCounts = countByMeal(todayConfirms, "confirmed_status");
+  // effective count — confirmed_status if the student has confirmed
+  // something (e.g. via No Food), otherwise falls back to booking_status.
+  // This is the SAME logic Meal Entries and Reports use (see
+  // utils.js:effectiveMealStatus), so this card can never drift from them
+  // the way separate "Booked" and "Confirmed" rows could — that previous
+  // design also had a real bug where a No Food confirmation counted as a
+  // positive number here, which it shouldn't.
+  const todayCounts = countByMeal(todayRows);
   const totalExpenseAmt = sumAmount(monthExpenses);
   const totalRevenueAmt = (monthPayments || []).reduce(
     (s, p) => s + Number(p.paid_amount || 0),
@@ -189,22 +186,15 @@ async function renderHome(root) {
 
     <div class="card">
       <h3>Today's Meals <span class="badge badge-locked">${formatDate(today)}</span></h3>
-      <p class="text-soft" style="font-size:12px;margin-bottom:10px;">Same numbers as Admin → Meal Entries for today — both read the exact same data, so they can't drift apart.</p>
+      <p class="text-soft" style="font-size:12px;margin-bottom:10px;">Same numbers as Admin → Meal Entries for today — both read the exact same effective status per meal, so they can't drift apart.</p>
       <div class="table-wrap">
         <table class="data-table">
-          <thead><tr><th></th><th>Breakfast</th><th>Lunch</th><th>Dinner</th></tr></thead>
+          <thead><tr><th>Breakfast</th><th>Lunch</th><th>Dinner</th></tr></thead>
           <tbody>
             <tr>
-              <td data-label="">Booked</td>
-              <td data-label="Breakfast">${bookingCounts.breakfast}</td>
-              <td data-label="Lunch">${bookingCounts.lunch}</td>
-              <td data-label="Dinner">${bookingCounts.dinner}</td>
-            </tr>
-            <tr>
-              <td data-label="">Confirmed</td>
-              <td data-label="Breakfast">${confirmedCounts.breakfast}</td>
-              <td data-label="Lunch">${confirmedCounts.lunch}</td>
-              <td data-label="Dinner">${confirmedCounts.dinner}</td>
+              <td data-label="Breakfast">${todayCounts.breakfast}</td>
+              <td data-label="Lunch">${todayCounts.lunch}</td>
+              <td data-label="Dinner">${todayCounts.dinner}</td>
             </tr>
           </tbody>
         </table>

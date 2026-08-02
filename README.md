@@ -563,6 +563,53 @@ other's editability, at either layer:
 matter what the frontend code does:
 `sql/PATCH_2026-08-10_decouple_confirmation_window.sql`
 
+## Fixed: submission requiring a change, and confirmed-status data consistency
+
+**Today's Confirmation no longer requires changing the patched value
+before submitting.** Previously, submitting was blocked with "select a
+different option" unless at least one meal's selection actually
+differed from the patched value — meaning a student who genuinely
+wanted to confirm "yes, that's still right" couldn't submit at all.
+Removed that check entirely (`js/student/confirmation.js`); Submit now
+sends every editable meal with a real selection, whether it matches the
+patched value or was switched to No Food.
+
+**Real data-consistency bug found and fixed**: switching a meal to No
+Food only ever writes `confirmed_status` (that's the only field it can
+touch) — but several screens were reading `booking_status` only, so
+the change was invisible there even though it showed correctly in the
+student's own History. Added one shared helper,
+`effectiveMealStatus()` (`js/utils.js`) — confirmed_status if the
+student has confirmed something, otherwise falls back to
+booking_status — and switched every screen that displays or counts a
+meal's current state to use it:
+
+- Admin Meal Entries — both the "Today's Meal Marking" table and its
+  Breakfast/Lunch/Dinner summary-card counts.
+- Admin Dashboard — the "Today's Meals" card. This used to show
+  separate "Booked" and "Confirmed" rows, which had its own bug: a No
+  Food confirmation was counted as a _positive_ number in the Confirmed
+  row (`!== 'no'` doesn't exclude `'no_food'`). Replaced with a single
+  effective-count row that genuinely matches Meal Entries and Reports,
+  instead of two raw numbers that could each drift for different
+  reasons.
+- Reports — "Today's Marking Report" and "Monthly Attendance Report."
+- Students Report's monthly totals — previously filtered
+  `confirmed_status IN ('yes','double')` directly in the query, which
+  undercounted any meal not yet auto-copied overnight (i.e. most of
+  today, every day). Now computed the same way as everywhere else.
+- Student's own home screen (the thali-ring status widget) — was
+  showing "pending" for a meal that's actually already locked to the
+  booking, before the nightly auto-copy ever runs.
+
+**Also fixed while in here**: the CSS class for a No Food badge was
+`.badge-nofood`, but every call site builds the class name as
+`badge-${status}` where the actual value is `no_food` (with an
+underscore) — so a No Food badge was silently unstyled everywhere it
+appeared. Renamed the CSS class to `.badge-no_food` to match.
+
+No database changes this round — everything above is client-side only.
+
 ## Not yet wired up (clearly-scoped follow-ups)
 
 - Image/bill uploads for expenses (`expenses.bill_url` column exists;
