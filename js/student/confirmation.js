@@ -1,39 +1,25 @@
 // ============================================================================
 // student/confirmation.js — "today" meal confirmation.
 //
-// A meal is pre-filled ("patched") with what was booked yesterday, and is
-// NOT editable at all unless the admin has enabled No Food for that specific
-// meal (Admin -> Settings -> No Food Option). When it IS editable, only two
-// choices are offered: the patched value itself, or "No Food" — nothing
-// else. This is intentionally independent of Tomorrow's Booking (see
-// js/student/booking.js): Today's Confirmation has NO time-of-day window at
-// all, only "already submitted" (confirmation_locked) or "admin cancelled"
-// can freeze it. Previously both tabs shared one evening window, which
-// meant the window simply closing due to normal time passing could make
-// Tomorrow's Booking look locked right after submitting Today's
-// Confirmation, even though nothing about that submission caused it. They
-// now share NO state or settings key at all, so one can never affect the
-// other's editability.
-//
-// Enforced twice over: the client hides the option group entirely for a
-// non-editable meal, and the database trigger (enforce_booking_write in
-// sql/schema.sql) rejects any confirmed_status write for a meal where No
-// Food is disabled, regardless of what a manipulated API call sends.
-// Meals left untouched this way are auto-confirmed to match the booking by
-// the nightly lock-confirmations sweep (see supabase/functions/lock-confirmations).
-//
-// Tapping an option only updates local selection (highlights it) — no API
-// call yet. A single Submit button sends everything changed in one batch
-// call, and locks ONLY Today's Confirmation — Tomorrow's Booking rows are a
-// completely separate date, untouched by this write.
+// Now respects the same booking window (8:30–11:30 PM server time) as
+// Tomorrow's Booking. When the window is closed, no changes can be made and
+// the submit button is hidden. All other behaviour (No Food option, lock
+// after submission, etc.) remains unchanged.
 // ============================================================================
 import { supabase, MEAL_TYPES, MEAL_LABELS, STATUS_LABELS } from "../config.js";
-import { todayISO, getSettings, effectiveMealStatus } from "../utils.js";
+import {
+  todayISO,
+  getSettings,
+  effectiveMealStatus,
+  getServerWindowStatus, // <-- new import
+} from "../utils.js";
 import { toast } from "../components/Toast.js";
 
 export async function renderConfirmationPanel(container, ctx) {
   const today = todayISO();
   const settings = await getSettings();
+  const windowStatus = await getServerWindowStatus();
+  const windowOpen = windowStatus.is_open;
 
   const { data: rows, error } = await supabase
     .from("bookings")
@@ -58,39 +44,76 @@ export async function renderConfirmationPanel(container, ctx) {
     selection[m] = effectiveMealStatus(byMeal[m]);
   });
 
-  const anyEditable = MEAL_TYPES.some((m) => isEditable(byMeal[m], settings));
+  const anyEditable = MEAL_TYPES.some(
+    (m) => isEditable(byMeal[m], settings, windowOpen), // pass windowOpen
+  );
 
-  container.innerHTML = `
-    ${MEAL_TYPES.map((meal) => mealCardHTML(meal, byMeal[meal], selection[meal], settings)).join("")}
-    ${anyEditable ? `<button class="btn btn-primary btn-block" id="submitConfirmation"><i class="fa-solid fa-check"></i> Submit Confirmation</button>` : ""}
+  // Build the panel HTML
+  let html = `
+    <div class="deadline-banner ${windowOpen ? "" : "is-locked"}">
+      <i class="fa-solid ${windowOpen ? "fa-clock" : "fa-lock"}"></i>
+      ${
+        windowOpen
+          ? `Booking window open until ${formatWindowLabel(windowStatus.window_close)} tonight.`
+          : `Booking is only open ${formatWindowLabel(windowStatus.window_open)}–${formatWindowLabel(windowStatus.window_close)} (server time).`
+      }
+    </div>
+    ${MEAL_TYPES.map((meal) =>
+      mealCardHTML(meal, byMeal[meal], selection[meal], settings, windowOpen),
+    ).join("")}
   `;
 
+  if (anyEditable && windowOpen) {
+    html += `<button class="btn btn-primary btn-block" id="submitConfirmation"><i class="fa-solid fa-check"></i> Submit Confirmation</button>`;
+  }
+
+  container.innerHTML = html;
+
   MEAL_TYPES.forEach((meal) =>
-    wireMealCardSelection(container, meal, byMeal[meal], selection, settings),
+    wireMealCardSelection(
+      container,
+      meal,
+      byMeal[meal],
+      selection,
+      settings,
+      windowOpen,
+    ),
   );
 
   const submitBtn = container.querySelector("#submitConfirmation");
   if (submitBtn) {
     submitBtn.addEventListener("click", () =>
-      submitConfirmations(container, ctx, today, byMeal, selection, settings),
+      submitConfirmations(
+        container,
+        ctx,
+        today,
+        byMeal,
+        selection,
+        settings,
+        windowOpen, // pass current window status
+      ),
     );
   }
 }
 
-/** a meal is editable only when: not already submitted/cancelled, AND the
- *  admin has enabled No Food for it. No time-of-day check at all — that's
- *  deliberately Tomorrow Booking's concern only, never Today Confirmation's. */
-function isEditable(row, settings) {
+/** a meal is editable only when: not locked/cancelled, No Food enabled,
+ *  AND the booking window is currently open. */
+function isEditable(row, settings, windowOpen) {
+  if (!windowOpen) return false;
   if (row?.confirmation_locked || row?.cancelled_by_admin) return false;
   return (
     settings[`no_food_enabled_${row ? row.meal_type : ""}`] === "true" || false
   );
 }
 
-function mealCardHTML(meal, row, selectedValue, settings) {
+function mealCardHTML(meal, row, selectedValue, settings, windowOpen) {
   const locked = row?.confirmation_locked || row?.cancelled_by_admin;
   const bookedStatus = row?.booking_status;
-  const editable = isEditable({ ...row, meal_type: meal }, settings);
+  const editable = isEditable(
+    { ...row, meal_type: meal },
+    settings,
+    windowOpen,
+  );
 
   if (!editable) {
     // frozen to the booking — no option group, nothing to tap
@@ -115,7 +138,9 @@ function mealCardHTML(meal, row, selectedValue, settings) {
               ? "Already submitted — locked"
               : row?.cancelled_by_admin
                 ? "Cancelled by admin"
-                : "Locked to your booking — No Food isn't available for this meal"
+                : !windowOpen
+                  ? "Booking window is closed"
+                  : "Locked to your booking — No Food isn't available for this meal"
           }
         </p>
       </div>
@@ -148,8 +173,15 @@ function mealCardHTML(meal, row, selectedValue, settings) {
   `;
 }
 
-function wireMealCardSelection(container, meal, row, selection, settings) {
-  if (!isEditable({ ...row, meal_type: meal }, settings)) return;
+function wireMealCardSelection(
+  container,
+  meal,
+  row,
+  selection,
+  settings,
+  windowOpen,
+) {
+  if (!isEditable({ ...row, meal_type: meal }, settings, windowOpen)) return;
   const card = container.querySelector(`[data-meal="${meal}"]`);
   if (!card) return;
   card.querySelectorAll(".option-btn").forEach((btn) => {
@@ -171,7 +203,16 @@ async function submitConfirmations(
   byMeal,
   selection,
   settings,
+  windowOpen,
 ) {
+  // Double-check the window hasn't closed since the page was rendered
+  if (!windowOpen) {
+    toast.error(
+      "The booking window is now closed. Confirmation cannot be submitted.",
+    );
+    return;
+  }
+
   const submitBtn = container.querySelector("#submitConfirmation");
 
   // submit every EDITABLE meal with a real selection — no requirement that
@@ -179,7 +220,8 @@ async function submitConfirmations(
   // is just as valid a submission as switching to No Food.
   const toSubmit = MEAL_TYPES.filter((m) => {
     const row = byMeal[m];
-    if (!isEditable({ ...row, meal_type: m }, settings)) return false;
+    if (!isEditable({ ...row, meal_type: m }, settings, windowOpen))
+      return false;
     return !!selection[m];
   });
 
@@ -222,4 +264,13 @@ async function submitConfirmations(
     "Confirmation submitted — locked. Tomorrow's Booking is unaffected.",
   );
   await renderConfirmationPanel(container, ctx);
+}
+
+// Helper to format HH:MM as 12‑hour time (copied from booking.js)
+function formatWindowLabel(hhmm) {
+  if (!hhmm) return "";
+  const [h, m] = String(hhmm).split(":").map(Number);
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
 }
