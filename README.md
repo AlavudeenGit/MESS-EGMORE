@@ -647,6 +647,24 @@ export automatically reflects the correct portion-weighted totals too
 
 No database changes this round — everything above is client-side only.
 
+## Reports now sort by room number, ascending
+
+Every report with a room column — Students Report, Today's Marking
+Report, Monthly Attendance Report, Tomorrow Booking Report — now sorts
+by room number ascending instead of by student name. One shared helper,
+`sortByRoom()` (`js/admin/reports.js`), does the sorting with
+`{ numeric: true }` so room numbers compare as actual numbers ("9"
+before "101"), not alphabetically. Since both the on-screen table and
+the Excel/PDF export just render whatever order `rows` is already in,
+sorting once at the source means this applies everywhere consistently
+— no separate export-side sort needed. Expense and Grocery Reports are
+unaffected (they have no student/room association).
+
+Scoped to the Reports page specifically — Meal Entries' own tables
+still sort by name, since "report" here was read as the Reports
+section rather than every table in the app. Let me know if you want
+Meal Entries switched too.
+
 ## Not yet wired up (clearly-scoped follow-ups)
 
 - Image/bill uploads for expenses (`expenses.bill_url` column exists;

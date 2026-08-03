@@ -262,6 +262,25 @@ function flattenForExport(columns, row) {
   return out;
 }
 
+/**
+ * Sorts rows by room number, ascending — used by every report that has
+ * one (Students, Today's Marking, Monthly Attendance, Tomorrow Booking).
+ * `numeric: true` makes this compare "9" before "101" as numbers, not as
+ * strings, so room numbers sort the way a person actually expects rather
+ * than lexicographically. This is what both the on-screen table and the
+ * Excel/PDF export end up showing, since both just render whatever order
+ * `rows` is already in by the time it reaches them.
+ */
+function sortByRoom(rows, getRoom) {
+  return rows.sort((a, b) =>
+    String(getRoom(a) ?? "").localeCompare(
+      String(getRoom(b) ?? ""),
+      undefined,
+      { numeric: true },
+    ),
+  );
+}
+
 // ---- period helpers (drives export title + filename — always the
 // SELECTED reporting date/period, never "today" the file was downloaded) --
 function currentMonthYYYYMM() {
@@ -370,14 +389,13 @@ async function fetchStudentsReport(f) {
     countsByStudent[r.student_id][r.meal_type] += count;
   });
 
-  rows = rows
-    .map((r) => ({
-      ...r,
-      breakfastCount: countsByStudent[r.id]?.breakfast || 0,
-      lunchCount: countsByStudent[r.id]?.lunch || 0,
-      dinnerCount: countsByStudent[r.id]?.dinner || 0,
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  rows = rows.map((r) => ({
+    ...r,
+    breakfastCount: countsByStudent[r.id]?.breakfast || 0,
+    lunchCount: countsByStudent[r.id]?.lunch || 0,
+    dinnerCount: countsByStudent[r.id]?.dinner || 0,
+  }));
+  sortByRoom(rows, (r) => r.room_number);
 
   return { rows, summary: [] };
 }
@@ -459,7 +477,7 @@ async function fetchAttendanceReport(f) {
         r.name.toLowerCase().includes(f.search) ||
         r.room.toLowerCase().includes(f.search),
     );
-  rows.sort((a, b) => a.name.localeCompare(b.name));
+  sortByRoom(rows, (r) => r.room);
 
   const totals = { breakfast: 0, lunch: 0, dinner: 0 };
   rows.forEach((r) =>
@@ -577,7 +595,7 @@ async function fetchMonthlyAttendanceReport(f) {
         s.name.toLowerCase().includes(f.search) ||
         s.room_number.toLowerCase().includes(f.search),
     );
-  studentRows.sort((a, b) => a.name.localeCompare(b.name));
+  sortByRoom(studentRows, (s) => s.room_number);
 
   const { data: bookingRows } = await supabase
     .from("bookings")
@@ -685,7 +703,7 @@ async function fetchTomorrowBookingReport(f) {
         r.name.toLowerCase().includes(f.search) ||
         r.room.toLowerCase().includes(f.search),
     );
-  rows.sort((a, b) => a.name.localeCompare(b.name));
+  sortByRoom(rows, (r) => r.room);
 
   const totals = { breakfast: 0, lunch: 0, dinner: 0 };
   rows.forEach((r) =>
