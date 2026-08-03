@@ -25,6 +25,7 @@ import {
   exportToExcelWithSummary,
   exportToPDFWithSummary,
   effectiveMealStatus,
+  mealCount,
 } from "../utils.js";
 import { renderTable } from "../components/Table.js";
 import { statCard } from "../components/Card.js";
@@ -359,13 +360,14 @@ async function fetchStudentsReport(f) {
 
   const countsByStudent = {};
   (mealRows || []).forEach((r) => {
-    if (!["yes", "double"].includes(effectiveMealStatus(r))) return;
+    const count = mealCount(effectiveMealStatus(r));
+    if (!count) return;
     countsByStudent[r.student_id] = countsByStudent[r.student_id] || {
       breakfast: 0,
       lunch: 0,
       dinner: 0,
     };
-    countsByStudent[r.student_id][r.meal_type]++;
+    countsByStudent[r.student_id][r.meal_type] += count;
   });
 
   rows = rows
@@ -462,7 +464,7 @@ async function fetchAttendanceReport(f) {
   const totals = { breakfast: 0, lunch: 0, dinner: 0 };
   rows.forEach((r) =>
     MEAL_TYPES.forEach((m) => {
-      if (["yes", "double"].includes(r[m])) totals[m]++;
+      totals[m] += mealCount(r[m]);
     }),
   );
 
@@ -688,7 +690,7 @@ async function fetchTomorrowBookingReport(f) {
   const totals = { breakfast: 0, lunch: 0, dinner: 0 };
   rows.forEach((r) =>
     MEAL_TYPES.forEach((m) => {
-      if (["yes", "double"].includes(r[m])) totals[m]++;
+      totals[m] += mealCount(r[m]);
     }),
   );
 

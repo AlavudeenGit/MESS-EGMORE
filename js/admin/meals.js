@@ -3,7 +3,10 @@
 //
 // Layout:
 //   1. Six summary cards: Today's Meals (B/L/D totals) + Tomorrow's
-//      Bookings (B/L/D totals).
+//      Bookings (B/L/D totals). These are portion counts, not headcounts —
+//      Yes = 1 meal, Double = 2 meals (see utils.js:mealCount) — so the
+//      kitchen's planning number reflects how much food to actually make,
+//      not just how many people are eating.
 //   2. "Today's Meal Marking" table — TODAY's effective status per student
 //      per meal (see utils.js:effectiveMealStatus — confirmed_status if the
 //      student has confirmed something, e.g. via No Food, otherwise falls
@@ -31,6 +34,7 @@ import {
   formatDate,
   debounce,
   effectiveMealStatus,
+  mealCount,
 } from "../utils.js";
 import { renderTable } from "../components/Table.js";
 import { statCard } from "../components/Card.js";
@@ -109,15 +113,9 @@ export async function renderMeals(root) {
   function countByMeal(rows) {
     const out = { breakfast: 0, lunch: 0, dinner: 0 };
     (rows || []).forEach((r) => {
-      out[r.meal_type] += bookingCountValue(r.booking_status);
+      out[r.meal_type] += mealCount(effectiveMealStatus(r));
     });
     return out;
-  }
-
-  function bookingCountValue(status) {
-    if (status === "double") return 2;
-    if (status === "yes") return 1;
-    return 0;
   }
 
   async function loadTodayTable() {

@@ -610,6 +610,43 @@ appeared. Renamed the CSS class to `.badge-no_food` to match.
 
 No database changes this round — everything above is client-side only.
 
+## Fixed: PDF export showing blank values, and Double now counts as 2 meals
+
+**PDF export bug**: Excel worked, PDF didn't — same underlying data,
+different bug. Both exports receive rows pre-flattened and keyed by
+column **label** (e.g. `'Student Name'`), not by the original column
+`key` (e.g. `'name'`). Excel's `sheet_add_json` just uses each row's own
+keys directly, so it worked regardless. PDF's table-builder was looking
+up `r[c.key]` — which doesn't exist on a label-keyed row — so every
+cell came back empty. Fixed both `exportToPDF` and
+`exportToPDFWithSummary` (`js/utils.js`) to look up by `c.label`
+instead, matching the actual shape of the data they're given.
+
+**Meal counting is now portion-weighted, not headcount**: Yes = 1
+meal, Double = 2 meals, everywhere a total is calculated — added one
+shared helper, `mealCount()` (`js/utils.js`), and applied it to every
+actual total in the app:
+
+- Meal Entries' six summary cards (Today's Meals / Tomorrow's Bookings)
+- Admin Dashboard's "Today's Meals" card
+- Today's Marking Report and Tomorrow Booking Report's summary cards
+- Students Report's monthly Breakfast/Lunch/Dinner totals
+
+Deliberately left as **boolean** (unchanged) — these answer "is there
+any activity to show," not "how many portions," so weighting them
+would have been wrong: which students appear in Meal Entries' two
+tables and both reports (the "at least one Yes/Double" visibility
+filter), Today's Status ("Full 3/3" / "Partial") since that's about how
+many of the day's 3 meal slots were used, Monthly Attendance's
+date-visibility filter, and Add Entry's "already marked" check.
+
+Because exports just render whatever `rows`/`summary` values the fetch
+functions compute, fixing the counting at the source means every
+export automatically reflects the correct portion-weighted totals too
+— no separate export-side logic needed.
+
+No database changes this round — everything above is client-side only.
+
 ## Not yet wired up (clearly-scoped follow-ups)
 
 - Image/bill uploads for expenses (`expenses.bill_url` column exists;

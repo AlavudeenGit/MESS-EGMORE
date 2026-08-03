@@ -20,6 +20,23 @@ export function effectiveMealStatus(row) {
   return row?.confirmed_status || row?.booking_status || null;
 }
 
+/**
+ * Numeric weight of a meal status for TOTALS/counts — Yes = 1 meal, Double
+ * = 2 meals (a double portion is two servings for kitchen-planning
+ * purposes), everything else (No, No Food, unset) = 0. Used everywhere a
+ * total/sum is calculated (Meal Entries summary cards, Dashboard, Reports,
+ * exports). This is intentionally separate from the boolean
+ * ['yes','double'].includes(status) checks used elsewhere for VISIBILITY
+ * (e.g. "does this student have any real activity today, so should they
+ * be listed at all") — those stay boolean; only actual totals use this
+ * weighted count.
+ */
+export function mealCount(status) {
+  if (status === "yes") return 1;
+  if (status === "double") return 2;
+  return 0;
+}
+
 // ---- date helpers -----------------------------------------------------------
 export function todayISO() {
   return toISO(new Date());
@@ -211,7 +228,13 @@ export function exportToPDF(
   doc.text(`Generated ${new Date().toLocaleString("en-IN")}`, 14, 22);
 
   const head = [columns.map((c) => c.label)];
-  const body = rows.map((r) => columns.map((c) => String(r[c.key] ?? "")));
+  // rows are pre-flattened objects keyed by LABEL (see flattenForExport in
+  // reports.js, and the equivalent inline shape built by other callers) —
+  // NOT by c.key. Looking up r[c.key] here was the bug: Excel's
+  // sheet_add_json just uses each row's own keys directly regardless of
+  // any separate columns array, so it worked by coincidence; this needs to
+  // explicitly match the same convention.
+  const body = rows.map((r) => columns.map((c) => String(r[c.label] ?? "")));
 
   if (doc.autoTable) {
     doc.autoTable({ head, body, startY: 28, styles: { fontSize: 8 } });
@@ -299,7 +322,8 @@ export function exportToPDFWithSummary(
   }
 
   const head = [columns.map((c) => c.label)];
-  const body = rows.map((r) => columns.map((c) => String(r[c.key] ?? "")));
+  // same convention as exportToPDF above — rows are keyed by LABEL
+  const body = rows.map((r) => columns.map((c) => String(r[c.label] ?? "")));
 
   if (doc.autoTable) {
     doc.autoTable({ head, body, startY: y, styles: { fontSize: 8 } });

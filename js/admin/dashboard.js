@@ -10,6 +10,7 @@ import {
   currency,
   formatDate,
   effectiveMealStatus,
+  mealCount,
 } from "../utils.js";
 import { statCard } from "../components/Card.js";
 import { openModal, closeModal } from "../components/Modal.js";
@@ -218,17 +219,12 @@ function activityRow(icon, text, when) {
   </div>`;
 }
 
-function countByMeal(rows, field) {
+function countByMeal(rows) {
   const out = { breakfast: 0, lunch: 0, dinner: 0 };
   (rows || []).forEach((r) => {
-    out[r.meal_type] += mealCountValue(r[field]);
+    out[r.meal_type] += mealCount(effectiveMealStatus(r));
   });
   return out;
-}
-function mealCountValue(status) {
-  if (status === "double") return 2;
-  if (status && status !== "no") return 1;
-  return 0;
 }
 function sumAmount(rows) {
   return (rows || []).reduce((s, r) => s + Number(r.amount || 0), 0);
