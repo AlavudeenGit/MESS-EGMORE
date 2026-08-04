@@ -665,6 +665,26 @@ still sort by name, since "report" here was read as the Reports
 section rather than every table in the app. Let me know if you want
 Meal Entries switched too.
 
+## Reversed: Today's Confirmation now uses the shared window again
+
+An earlier round explicitly decoupled Today's Confirmation from any time
+window at all (only lock status + No Food gated it), specifically because
+sharing a window with Tomorrow's Booking made them appear to lock
+together. That's been reversed by explicit request: Confirmation is back
+to checking the same shared window as Tomorrow's Booking
+(`booking_open_time`/`booking_close_time`, via
+`getServerWindowStatus()` — the database's clock, not the device's).
+Nothing else about Confirmation changed — lock behavior, the No Food
+gating, and the fact that submitting here never touches a tomorrow row
+are all exactly as before.
+
+Both the client (`js/student/confirmation.js`) and the database trigger
+(`enforce_booking_write` in `sql/schema.sql`) were updated together, as
+always — the trigger is the actual enforcement layer, so a client-only
+change wouldn't have done anything on its own.
+
+**Deploy required**: `sql/PATCH_2026-08-17_restore_confirmation_window.sql`
+
 ## Not yet wired up (clearly-scoped follow-ups)
 
 - Image/bill uploads for expenses (`expenses.bill_url` column exists;

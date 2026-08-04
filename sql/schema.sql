@@ -366,26 +366,24 @@ begin
     new.booked_at := now();
   end if;
 
-  -- confirmed_status: only for today, only while unlocked, and ONLY when
-  -- No Food is enabled for that specific meal (Admin -> Settings). When
-  -- it's disabled (the default), the meal is pre-filled from yesterday's
-  -- booking and is NOT editable by the student in any way — the nightly
-  -- lock-confirmations sweep copies booking_status into confirmed_status
-  -- automatically for those meals (see supabase/functions/lock-confirmations).
-  --
-  -- Deliberately independent of Tomorrow Booking's time window above — no
-  -- v_within_window check here at all. Only "already submitted"
-  -- (confirmation_locked) and "No Food enabled for this meal" gate it.
-  -- Previously both shared one window, which meant the window simply
-  -- closing from normal time passing could make booking_status writes
-  -- fail right around when a student submitted a confirmation, looking
-  -- like one action locked the other when neither actually did.
+  -- confirmed_status: only for today, only while unlocked, only when No
+  -- Food is enabled for that specific meal (Admin -> Settings), AND only
+  -- while the shared meal-selection window is open — the SAME window
+  -- Tomorrow's Booking uses (booking_open_time/booking_close_time,
+  -- v_within_window computed above). When No Food is disabled (the
+  -- default), the meal is pre-filled from yesterday's booking and is NOT
+  -- editable by the student in any way — the nightly lock-confirmations
+  -- sweep copies booking_status into confirmed_status automatically for
+  -- those meals (see supabase/functions/lock-confirmations).
   if new.confirmed_status is distinct from old.confirmed_status then
     if new.date <> current_date then
       raise exception 'Confirmation is only accepted for today''s date';
     end if;
     if coalesce(old.confirmation_locked, false) then
       raise exception 'Confirmation is locked and cannot be changed';
+    end if;
+    if not v_within_window then
+      raise exception 'Confirmation window is closed';
     end if;
     select value = 'true' into v_no_food_enabled from settings where key = 'no_food_enabled_' || new.meal_type;
     if not coalesce(v_no_food_enabled, false) then
