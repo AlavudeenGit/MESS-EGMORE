@@ -685,6 +685,34 @@ change wouldn't have done anything on its own.
 
 **Deploy required**: `sql/PATCH_2026-08-17_restore_confirmation_window.sql`
 
+## Meal Entries' override modal now offers No Food too
+
+The per-student Edit modal on Meal Entries used to split each meal into
+an editable "Booking" section (Yes/No/Double) and a read-only "Confirmed"
+line below it — No Food wasn't reachable from there at all, only from
+Add Entry. Unified into a single 4-option control per meal
+(Yes/No/Double/No Food), pre-filled from the current effective status
+(`utils.js:effectiveMealStatus`) instead of just the raw booking.
+
+One data-model detail that shaped the fix, same as everywhere else No
+Food appears: it can only ever live in `confirmed_status` —
+`booking_status`'s `CHECK` constraint doesn't allow it. Choosing No Food
+writes `booking_status='yes'` + `confirmed_status='no_food'`; every other
+choice writes the same value to both columns. Extracted this mapping into
+one shared helper, `mapMealChoiceToStatuses()` in `js/admin/meals.js`,
+used by both this modal and Add Entry — previously each had its own
+copy of the same logic.
+
+No other screen needed to change. Every place that displays or counts a
+meal (Dashboard, both Attendance reports, Students Report, student
+History) already handles `no_food` as a real value via
+`effectiveMealStatus`/`mealCount` from earlier consistency work — this
+was purely about exposing an already-supported value through one more
+admin entry point. No database changes either: admin writes already
+bypass the No-Food-must-be-admin-enabled restriction entirely (that
+restriction only ever applied to students), so this needed no trigger
+change.
+
 ## Not yet wired up (clearly-scoped follow-ups)
 
 - Image/bill uploads for expenses (`expenses.bill_url` column exists;

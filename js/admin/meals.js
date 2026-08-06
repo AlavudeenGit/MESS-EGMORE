@@ -41,6 +41,22 @@ import { statCard } from "../components/Card.js";
 import { openModal, closeModal, confirmDialog } from "../components/Modal.js";
 import { toast } from "../components/Toast.js";
 
+/**
+ * Maps a single admin-facing meal choice (Yes/No/Double/No Food) onto the
+ * two underlying columns. No Food can only ever live in confirmed_status —
+ * booking_status's CHECK constraint doesn't allow it — so choosing it
+ * writes booking_status='yes' + confirmed_status='no_food' (the one
+ * combination the rest of the app already treats as "booked normally,
+ * then didn't eat"). Every other choice writes the same value to both
+ * columns, so the two are always consistent right after an admin sets
+ * them — used by both the per-student override modal and Add Entry.
+ */
+function mapMealChoiceToStatuses(choice) {
+  if (choice === "no_food")
+    return { booking_status: "yes", confirmed_status: "no_food" };
+  return { booking_status: choice, confirmed_status: choice };
+}
+
 export async function renderMeals(root) {
   const today = todayISO();
   const tomorrow = tomorrowISO();
@@ -48,7 +64,15 @@ export async function renderMeals(root) {
   root.innerHTML = `
     <div id="mealsSummary" class="card-grid"></div>
 
-
+    <div class="card">
+      <h3>Bulk Cancel a Meal</h3>
+      <p class="text-soft" style="font-size:13px;">Cancelling sets every student's booking for that meal to "No" and locks it.</p>
+      <div class="filter-bar">
+        <select id="cancelDay"><option value="${today}">Today</option><option value="${tomorrow}">Tomorrow</option></select>
+        <select id="cancelMeal">${MEAL_TYPES.map((m) => `<option value="${m}">${MEAL_LABELS[m]}</option>`).join("")}</select>
+        <button class="btn btn-danger btn-sm" id="cancelMealBtn"><i class="fa-solid fa-ban"></i> Cancel Meal</button>
+      </div>
+    </div>
 
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
@@ -69,16 +93,6 @@ export async function renderMeals(root) {
         <input type="text" id="filterNameTomorrow" placeholder="Search name or room…">
       </div>
       <div id="tomorrowTable"><div class="skeleton" style="height:200px;border-radius:16px;"></div></div>
-    </div>
-    
-        <div class="card">
-      <h3>Bulk Cancel a Meal</h3>
-      <p class="text-soft" style="font-size:13px;">Cancelling sets every student's booking for that meal to "No" and locks it.</p>
-      <div class="filter-bar">
-        <select id="cancelDay"><option value="${today}">Today</option><option value="${tomorrow}">Tomorrow</option></select>
-        <select id="cancelMeal">${MEAL_TYPES.map((m) => `<option value="${m}">${MEAL_LABELS[m]}</option>`).join("")}</select>
-        <button class="btn btn-danger btn-sm" id="cancelMealBtn"><i class="fa-solid fa-ban"></i> Cancel Meal</button>
-      </div>
     </div>
   `;
 
@@ -320,32 +334,29 @@ export async function renderMeals(root) {
 }
 
 function openOverrideModal(studentRow, date, onSaved) {
-  const bookingOptions = ["yes", "no", "double"];
+  const mealOptions = ["yes", "no", "double", "no_food"];
 
   const sectionsHTML = MEAL_TYPES.map((meal) => {
     const row = studentRow.meals[meal];
-    const confirmedLabel = row?.confirmed_status
-      ? STATUS_LABELS[row.confirmed_status]
-      : "Not yet confirmed by student";
+    const current = effectiveMealStatus(row);
     return `
       <div style="margin-bottom:20px;" data-meal-section="${meal}">
         <h4>${MEAL_LABELS[meal]}</h4>
-        <p class="text-soft" style="font-size:12px;margin:0 0 6px;">Booking (set yesterday for today)</p>
-        <div class="option-group">${bookingOptions.map((o) => `<button class="option-btn ${row?.booking_status === o ? "is-selected" : ""}" data-meal="${meal}" data-value="${o}">${STATUS_LABELS[o]}</button>`).join("")}</div>
-        <p class="text-soft" style="font-size:12px;margin:10px 0 0;"><i class="fa-solid fa-lock"></i> Confirmed: ${confirmedLabel} — set by the student, not editable here</p>
+        <p class="text-soft" style="font-size:12px;margin:0 0 6px;">Today's meal status</p>
+        <div class="option-group option-group--4">${mealOptions.map((o) => `<button class="option-btn ${current === o ? "is-selected" : ""}" data-meal="${meal}" data-value="${o}">${STATUS_LABELS[o]}</button>`).join("")}</div>
       </div>
       <hr class="divider">
     `;
   }).join("");
 
   const body = openModal({
-    title: `Override Booking — ${studentRow.name} (Today)`,
+    title: `Override — ${studentRow.name} (Today)`,
     bodyHTML: `${sectionsHTML}<button class="btn btn-primary btn-block" id="saveOverride">Save Changes</button>`,
   });
 
   const newValues = {};
   MEAL_TYPES.forEach((meal) => {
-    newValues[meal] = studentRow.meals[meal]?.booking_status || null;
+    newValues[meal] = effectiveMealStatus(studentRow.meals[meal]);
   });
 
   body.querySelectorAll(".option-btn").forEach((btn) => {
@@ -364,28 +375,23 @@ function openOverrideModal(studentRow, date, onSaved) {
     saveBtn.disabled = true;
     saveBtn.textContent = "Saving…";
 
-    const payload = MEAL_TYPES.map((meal) => {
-      const original = studentRow.meals[meal]?.booking_status || null;
-      const row = {
-        student_id: studentRow.student_id,
-        date,
-        meal_type: meal,
-        booking_status: newValues[meal],
-      };
-      // If this meal's booking actually changed, keep confirmed_status in
-      // sync with it — otherwise the Students Report / Monthly Attendance
-      // Report (which read confirmed_status for their totals) would still
-      // show the OLD value for this meal even though the admin just
-      // corrected the booking. Only the meal(s) actually changed are
-      // touched here — an untouched meal's real confirmed_status (e.g. a
-      // student's own No Food choice) is never overwritten.
-      if (newValues[meal] !== original) {
-        row.confirmed_status = newValues[meal];
-        row.confirmation_locked = true;
-        row.confirmed_at = new Date().toISOString();
-      }
-      return row;
-    });
+    // only touch a meal the admin actually changed — an untouched meal's
+    // real data (booking + confirmed) is left completely alone
+    const payload = MEAL_TYPES.filter(
+      (meal) => newValues[meal] !== effectiveMealStatus(studentRow.meals[meal]),
+    ).map((meal) => ({
+      student_id: studentRow.student_id,
+      date,
+      meal_type: meal,
+      ...mapMealChoiceToStatuses(newValues[meal]),
+      confirmation_locked: true,
+      confirmed_at: new Date().toISOString(),
+    }));
+
+    if (!payload.length) {
+      closeModal();
+      return;
+    }
 
     const { error } = await supabase
       .from("bookings")
@@ -576,15 +582,11 @@ async function openAddEntryModal(onSaved) {
     const date = body.querySelector("#aeDate").value;
     const payload = MEAL_TYPES.map((meal) => {
       const choice = selection[meal];
-      const statuses =
-        choice === "no_food"
-          ? { booking_status: "yes", confirmed_status: "no_food" }
-          : { booking_status: choice, confirmed_status: choice };
       return {
         student_id: selectedStudentId,
         date,
         meal_type: meal,
-        ...statuses,
+        ...mapMealChoiceToStatuses(choice),
         booking_locked: true,
         booked_at: new Date().toISOString(),
         confirmation_locked: true,
