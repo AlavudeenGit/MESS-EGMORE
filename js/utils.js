@@ -68,6 +68,24 @@ export function isoDayOfWeek(iso) {
   const js = d.getDay(); // 0=Sun..6=Sat
   return js === 0 ? 7 : js;
 }
+/**
+ * Fetches the weekly menu row for the given date's day of week — e.g. what's
+ * actually being served for Breakfast/Lunch/Dinner that day. Used to show
+ * the dish name next to the meal label in Mark Food (Today's Confirmation
+ * and Tomorrow's Booking), same menu data as the read-only Weekly Menu page.
+ * Returns empty strings (never throws) if there's no menu set for that day.
+ */
+export async function getMenuForDate(iso) {
+  const dow = isoDayOfWeek(iso);
+  const { data, error } = await supabase
+    .from("menu")
+    .select("breakfast_text, lunch_text, dinner_text")
+    .eq("day_of_week", dow)
+    .maybeSingle();
+  if (error || !data)
+    return { breakfast_text: "", lunch_text: "", dinner_text: "" };
+  return data;
+}
 export function monthStartISO(year, month /* 1-12 */) {
   return `${year}-${String(month).padStart(2, "0")}-01`;
 }

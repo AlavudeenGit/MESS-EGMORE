@@ -25,6 +25,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 .meal-card__head .meal-name {
   font-family: var(--font-display);
@@ -34,6 +36,7 @@
 .meal-card__menu-text {
   font-size: 13px;
   color: var(--color-ink-soft);
+  font-weight: 400;
 }
 .deadline-banner {
   display: flex;

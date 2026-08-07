@@ -42,14 +42,16 @@ import {
   getSettings,
   getServerWindowStatus,
   effectiveMealStatus,
+  getMenuForDate,
 } from "../utils.js";
 import { toast } from "../components/Toast.js";
 
 export async function renderConfirmationPanel(container, ctx) {
   const today = todayISO();
-  const [settings, windowStatus] = await Promise.all([
+  const [settings, windowStatus, menu] = await Promise.all([
     getSettings(),
     getServerWindowStatus(),
+    getMenuForDate(today),
   ]);
   const windowOpen = windowStatus.is_open;
 
@@ -89,7 +91,7 @@ export async function renderConfirmationPanel(container, ctx) {
           : `Confirmation is only open ${formatWindowLabel(windowStatus.window_open)}–${formatWindowLabel(windowStatus.window_close)} (server time).`
       }
     </div>
-    ${MEAL_TYPES.map((meal) => mealCardHTML(meal, byMeal[meal], selection[meal], settings, windowOpen)).join("")}
+    ${MEAL_TYPES.map((meal) => mealCardHTML(meal, byMeal[meal], selection[meal], settings, windowOpen, menu[`${meal}_text`])).join("")}
     ${anyEditable && windowOpen ? `<button class="btn btn-primary btn-block" id="submitConfirmation"><i class="fa-solid fa-check"></i> Submit Confirmation</button>` : ""}
   `;
 
@@ -139,13 +141,21 @@ function isEditable(row, settings, windowOpen) {
   );
 }
 
-function mealCardHTML(meal, row, selectedValue, settings, windowOpen) {
+function mealCardHTML(
+  meal,
+  row,
+  selectedValue,
+  settings,
+  windowOpen,
+  menuText,
+) {
   const bookedStatus = row?.booking_status;
   const editable = isEditable(
     { ...row, meal_type: meal },
     settings,
     windowOpen,
   );
+  const nameHTML = `<span class="meal-name">${MEAL_LABELS[meal]}</span>${menuText ? ` <span class="meal-card__menu-text">(${menuText})</span>` : ""}`;
 
   if (!editable) {
     // frozen to the booking — no option group, nothing to tap
@@ -153,7 +163,7 @@ function mealCardHTML(meal, row, selectedValue, settings, windowOpen) {
     return `
       <div class="card meal-card" data-meal="${meal}">
         <div class="meal-card__head">
-          <span class="meal-name">${MEAL_LABELS[meal]}</span>
+          <span>${nameHTML}</span>
           ${
             row?.cancelled_by_admin
               ? '<span class="badge badge-no">Cancelled</span>'
@@ -188,7 +198,7 @@ function mealCardHTML(meal, row, selectedValue, settings, windowOpen) {
   return `
     <div class="card meal-card" data-meal="${meal}">
       <div class="meal-card__head">
-        <span class="meal-name">${MEAL_LABELS[meal]}</span>
+        <span>${nameHTML}</span>
         ${bookedStatus ? `<span class="badge badge-${bookedStatus}">Booked: ${STATUS_LABELS[bookedStatus]}</span>` : '<span class="badge badge-locked">Not booked</span>'}
       </div>
       <div class="option-group" style="grid-template-columns: repeat(${options.length}, 1fr);">

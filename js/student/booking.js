@@ -9,7 +9,11 @@
 // window (default 8:30–11:30 PM).
 // ============================================================================
 import { supabase, MEAL_TYPES, MEAL_LABELS, STATUS_LABELS } from "../config.js";
-import { tomorrowISO, getServerWindowStatus } from "../utils.js";
+import {
+  tomorrowISO,
+  getServerWindowStatus,
+  getMenuForDate,
+} from "../utils.js";
 import { toast } from "../components/Toast.js";
 import { renderConfirmationPanel } from "./confirmation.js";
 
@@ -41,7 +45,10 @@ export async function renderMarkFood(root, ctx) {
 
 async function renderBookingPanel(container, ctx) {
   const tomorrow = tomorrowISO();
-  const windowStatus = await getServerWindowStatus();
+  const [windowStatus, menu] = await Promise.all([
+    getServerWindowStatus(),
+    getMenuForDate(tomorrow),
+  ]);
   const windowOpen = windowStatus.is_open;
 
   const { data: rows, error } = await supabase
@@ -74,7 +81,7 @@ async function renderBookingPanel(container, ctx) {
           : `Booking is only open ${formatWindowLabel(windowStatus.window_open)}–${formatWindowLabel(windowStatus.window_close)} (server time).`
       }
     </div>
-    ${MEAL_TYPES.map((meal) => bookingCardHTML(meal, byMeal[meal], selection[meal], windowOpen)).join("")}
+    ${MEAL_TYPES.map((meal) => bookingCardHTML(meal, byMeal[meal], selection[meal], windowOpen, menu[`${meal}_text`])).join("")}
     ${windowOpen ? `<button class="btn btn-primary btn-block" id="submitBooking"><i class="fa-solid fa-check"></i> Submit Booking</button>` : ""}
   `;
 
@@ -104,13 +111,14 @@ function formatWindowLabel(hhmm) {
   return `${h12}:${String(m).padStart(2, "0")} ${period}`;
 }
 
-function bookingCardHTML(meal, row, selectedValue, windowOpen) {
+function bookingCardHTML(meal, row, selectedValue, windowOpen, menuText) {
   const locked = row?.booking_locked || row?.cancelled_by_admin;
   const disabled = locked || !windowOpen;
+  const nameHTML = `<span class="meal-name">${MEAL_LABELS[meal]}</span>${menuText ? ` <span class="meal-card__menu-text">(${menuText})</span>` : ""}`;
   return `
     <div class="card meal-card" data-meal="${meal}">
       <div class="meal-card__head">
-        <span class="meal-name">${MEAL_LABELS[meal]}</span>
+        <span>${nameHTML}</span>
         ${row?.cancelled_by_admin ? '<span class="badge badge-no">Cancelled by admin</span>' : ""}
       </div>
       <div class="option-group">

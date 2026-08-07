@@ -713,6 +713,27 @@ bypass the No-Food-must-be-admin-enabled restriction entirely (that
 restriction only ever applied to students), so this needed no trigger
 change.
 
+## Mark Food now shows the actual dish next to each meal name
+
+Both Today's Confirmation and Tomorrow's Booking show what's actually on
+the menu that day — e.g. "Breakfast (Idli)" — pulled from the same
+weekly menu data the read-only Weekly Menu page uses. Added one shared
+helper, `getMenuForDate()` in `js/utils.js`, and used it in both
+`js/student/confirmation.js` (today's day-of-week) and
+`js/student/booking.js` (tomorrow's). If no menu is set for that day, the
+dish text is simply omitted rather than showing an empty "()" .
+
+Used the `.meal-card__menu-text` class that already existed in
+`css/student.css` but had no JS actually using it yet — displayed as a
+smaller, muted span right next to the bold meal name rather than
+concatenated into that same bold text, so it doesn't visually compete
+with the meal name or overflow the card header on narrow screens (also
+added `flex-wrap`/`gap` there defensively, since dish names can run
+long, e.g. "Idli, Vada, Sambar, Chutney").
+
+No database or admin changes — this only reads the existing `menu`
+table, doesn't touch how any of it is edited.
+
 ## Not yet wired up (clearly-scoped follow-ups)
 
 - Image/bill uploads for expenses (`expenses.bill_url` column exists;
